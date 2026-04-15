@@ -9,22 +9,26 @@ function toDateTime(value) {
 test("ScheduledMessage.claimDue reclaims stale processing rows without touching fresh claims", async () => {
     const originalDriver = ScheduledMessage.driver;
     const connection = { name: "transaction-connection" };
-    const queries = [];
+    const findCalls = [];
+    const updateCalls = [];
 
     ScheduledMessage.driver = {
         toDateTime,
+        lte(value) {
+            return { "<=": value };
+        },
         async transaction(callback) {
             return callback(connection);
         },
-        async query(sql, params, options = {}) {
-            queries.push({ sql: sql.replace(/\s+/g, " ").trim(), params, options });
+        async find(table, { filter, view, opt, connection: activeConnection } = {}) {
+            findCalls.push({ table, filter, view, opt, connection: activeConnection });
 
-            if (queries.length === 1) {
+            if (findCalls.length === 1) {
                 return [{ id: "pending-1" }, { id: "stale-1" }];
             }
 
-            if (queries.length === 2) {
-                return { affectedRows: 2 };
+            if (findCalls.length === 2) {
+                return [{ id: "stale-1", scheduled_for: "2026-04-15 11:30:00", status: "processing", claimed_at: "2026-04-15 11:40:00" }];
             }
 
             return [{
@@ -59,6 +63,10 @@ test("ScheduledMessage.claimDue reclaims stale processing rows without touching 
                 updated_at: "2026-04-15 12:00:00",
             }];
         },
+        async update(table, data, clause, { connection: activeConnection } = {}) {
+            updateCalls.push({ table, data, clause, connection: activeConnection });
+            return { affectedRows: 1 };
+        },
     };
 
     try {
@@ -73,29 +81,44 @@ test("ScheduledMessage.claimDue reclaims stale processing rows without touching 
         assert.equal(claimedMessages[0].claimToken, "claim-1");
         assert.equal(claimedMessages[1].phoneNumber, "5551888888888");
 
-        assert.match(queries[0].sql, /status = \? OR \(status = \? AND claimed_at IS NOT NULL AND claimed_at <= \?\)/);
-        assert.deepEqual(queries[0].params, [
-            "2026-04-15 12:00:00",
-            ScheduledMessage.STATUS_PENDING,
-            ScheduledMessage.STATUS_PROCESSING,
-            "2026-04-15 11:50:00",
-            2,
-        ]);
-        assert.equal(queries[0].options.connection, connection);
-
-        assert.match(queries[1].sql, /WHERE id IN \(\?, \?\) AND \( status = \? OR \(status = \? AND claimed_at IS NOT NULL AND claimed_at <= \?\) \)/);
-        assert.deepEqual(queries[1].params, [
-            ScheduledMessage.STATUS_PROCESSING,
-            "claim-1",
-            "2026-04-15 12:00:00",
-            "2026-04-15 12:00:00",
-            "2026-04-15 12:00:00",
-            "pending-1",
-            "stale-1",
-            ScheduledMessage.STATUS_PENDING,
-            ScheduledMessage.STATUS_PROCESSING,
-            "2026-04-15 11:50:00",
-        ]);
+        assert.deepEqual(findCalls[0], {
+            table: ScheduledMessage.table,
+            filter: {
+                scheduled_for: { "<=": "2026-04-15 12:00:00" },
+                status: ScheduledMessage.STATUS_PENDING,
+            },
+            view: ["id", "scheduled_for", "status", "claimed_at"],
+            opt: {
+                order: { scheduled_for: 1 },
+                limit: 2,
+            },
+            connection,
+        });
+        assert.deepEqual(findCalls[1], {
+            table: ScheduledMessage.table,
+            filter: {
+                scheduled_for: { "<=": "2026-04-15 12:00:00" },
+                status: ScheduledMessage.STATUS_PROCESSING,
+                claimed_at: { "<=": "2026-04-15 11:50:00" },
+            },
+            view: ["id", "scheduled_for", "status", "claimed_at"],
+            opt: {
+                order: { scheduled_for: 1 },
+                limit: 2,
+            },
+            connection,
+        });
+        assert.equal(updateCalls.length, 2);
+        assert.deepEqual(updateCalls[0].clause, {
+            id: "stale-1",
+            status: ScheduledMessage.STATUS_PROCESSING,
+            claimed_at: { "<=": "2026-04-15 11:50:00" },
+        });
+        assert.deepEqual(updateCalls[1].clause, {
+            id: "pending-1",
+            status: ScheduledMessage.STATUS_PENDING,
+        });
+        assert.equal(findCalls[2].connection, connection);
     } finally {
         ScheduledMessage.driver = originalDriver;
     }

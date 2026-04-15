@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import test from 'node:test';
 import { createApp } from '../app.js';
+import { createAppConfig } from '../config/app-config.js';
 
 /**
  * Starts the API app on an ephemeral port for smoke testing.
@@ -37,4 +38,21 @@ test('GET /ready returns the success envelope and WhatsApp bootstrap config', as
     } finally {
         await stopTestServer(server);
     }
+});
+
+test('createAppConfig exposes API host and port defaults used by startup', () => {
+    const runtimeConfig = createAppConfig({});
+
+    assert.equal(runtimeConfig.host, '0.0.0.0');
+    assert.equal(runtimeConfig.port, 3000);
+});
+
+test('createAppConfig reads API host and port overrides from the environment', () => {
+    const runtimeConfig = createAppConfig({
+        API_HOST: '127.0.0.1',
+        API_PORT: '4321',
+    });
+
+    assert.equal(runtimeConfig.host, '127.0.0.1');
+    assert.equal(runtimeConfig.port, 4321);
 });

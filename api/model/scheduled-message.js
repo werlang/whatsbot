@@ -220,60 +220,95 @@ class ScheduledMessage extends Model {
         reclaimAfterMs = this.DEFAULT_RECLAIM_AFTER_MS,
     } = {}) {
         const claimTime = new Date(now);
+        const boundedLimit = Math.max(1, Number.parseInt(limit, 10) || 5);
         const boundedReclaimAfterMs = Math.max(Number(reclaimAfterMs) || this.DEFAULT_RECLAIM_AFTER_MS, 1000);
         const dueAt = this.driver.toDateTime(claimTime);
         const claimedAt = this.driver.toDateTime(claimTime);
         const reclaimBefore = this.driver.toDateTime(new Date(claimTime.getTime() - boundedReclaimAfterMs));
+        const claimPayload = this.serializeMutablePayload({
+            status: this.STATUS_PROCESSING,
+            claimToken,
+            claimedAt,
+            lastAttemptAt: claimedAt,
+            updatedAt: claimedAt,
+        });
 
         return this.driver.transaction(async connection => {
-            const dueRows = await this.driver.query(
-                `SELECT id
-                 FROM \`${this.table}\`
-                 WHERE scheduled_for <= ?
-                   AND (
-                       status = ?
-                       OR (status = ? AND claimed_at IS NOT NULL AND claimed_at <= ?)
-                   )
-                 ORDER BY scheduled_for ASC
-                 LIMIT ?
-                 FOR UPDATE`,
-                [dueAt, this.STATUS_PENDING, this.STATUS_PROCESSING, reclaimBefore, Number(limit)],
-                { connection },
-            );
+            const [pendingRows, staleProcessingRows] = await Promise.all([
+                this.driver.find(this.table, {
+                    filter: {
+                        scheduled_for: this.driver.lte(dueAt),
+                        status: this.STATUS_PENDING,
+                    },
+                    view: ["id", "scheduled_for", "status", "claimed_at"],
+                    opt: {
+                        order: { scheduled_for: 1 },
+                        limit: boundedLimit,
+                    },
+                    connection,
+                }),
+                this.driver.find(this.table, {
+                    filter: {
+                        scheduled_for: this.driver.lte(dueAt),
+                        status: this.STATUS_PROCESSING,
+                        claimed_at: this.driver.lte(reclaimBefore),
+                    },
+                    view: ["id", "scheduled_for", "status", "claimed_at"],
+                    opt: {
+                        order: { scheduled_for: 1 },
+                        limit: boundedLimit,
+                    },
+                    connection,
+                }),
+            ]);
 
-            if (!Array.isArray(dueRows) || dueRows.length === 0) {
+            const dueRows = [...pendingRows, ...staleProcessingRows]
+                .sort((left, right) => String(left.scheduled_for).localeCompare(String(right.scheduled_for)))
+                .slice(0, boundedLimit);
+
+            if (dueRows.length === 0) {
                 return [];
             }
 
-            const ids = dueRows.map(row => row.id);
-            const placeholders = ids.map(() => "?").join(", ");
-            await this.driver.query(
-                `UPDATE \`${this.table}\`
-                 SET status = ?, claim_token = ?, claimed_at = ?, last_attempt_at = ?, updated_at = ?
-                 WHERE id IN (${placeholders})
-                   AND (
-                       status = ?
-                       OR (status = ? AND claimed_at IS NOT NULL AND claimed_at <= ?)
-                   )`,
-                [
-                    this.STATUS_PROCESSING,
-                    claimToken,
-                    claimedAt,
-                    claimedAt,
-                    claimedAt,
-                    ...ids,
-                    this.STATUS_PENDING,
-                    this.STATUS_PROCESSING,
-                    reclaimBefore,
-                ],
-                { connection },
-            );
+            const claimedIds = [];
 
-            const rows = await this.driver.query(
-                `SELECT ${this.view.join(", ")} FROM \`${this.table}\` WHERE claim_token = ? ORDER BY scheduled_for ASC`,
-                [claimToken],
-                { connection },
-            );
+            for (const row of dueRows) {
+                const claimFilter = row.status === this.STATUS_PROCESSING
+                    ? {
+                        id: row.id,
+                        status: this.STATUS_PROCESSING,
+                        claimed_at: this.driver.lte(reclaimBefore),
+                    }
+                    : {
+                        id: row.id,
+                        status: this.STATUS_PENDING,
+                    };
+
+                const result = await this.driver.update(this.table, claimPayload, claimFilter, { connection });
+
+                if (result?.affectedRows > 0) {
+                    claimedIds.push(row.id);
+                }
+
+                if (claimedIds.length >= boundedLimit) {
+                    break;
+                }
+            }
+
+            if (claimedIds.length === 0) {
+                return [];
+            }
+
+            const rows = await this.driver.find(this.table, {
+                filter: {
+                    claim_token: claimToken,
+                },
+                view: this.view,
+                opt: {
+                    order: { scheduled_for: 1 },
+                },
+                connection,
+            });
 
             return rows.map(row => this.normalize(row));
         });

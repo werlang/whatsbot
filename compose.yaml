@@ -1,54 +1,35 @@
 services:
-  api:
-    build: ./api
-    restart: unless-stopped
-    working_dir: /app
-    env_file:
-      - .env
-    environment:
-      PORT: 3000
-      MYSQL_HOST: ${MYSQL_HOST:-mysql}
-      MYSQL_PORT: ${MYSQL_PORT:-3306}
-      WHATSAPP_AUTH_PATH: ${WHATSAPP_AUTH_PATH:-/app/storage/whatsapp-auth}
-      PUPPETEER_SKIP_DOWNLOAD: ${PUPPETEER_SKIP_DOWNLOAD:-true}
-      PUPPETEER_EXECUTABLE_PATH: ${PUPPETEER_EXECUTABLE_PATH:-/usr/bin/chromium-browser}
-    ports:
-      - ${API_PORT:-3000}:3000
-    command: npm run production
-    depends_on:
-      - mysql
-    volumes:
-      - whatsapp_auth:/app/storage/whatsapp-auth
+    api:
+        build: ./api
+        restart: unless-stopped
+        working_dir: /app
+        env_file:
+            - .env
+        command: npm run production
+        depends_on:
+            - mysql
+        volumes:
+            - whatsapp_auth:/whatsapp/auth
 
-  web:
-    build: ./web
-    restart: unless-stopped
-    working_dir: /app
-    env_file:
-      - .env
-    environment:
-      PORT: 3000
-      API_URL: ${API_URL:-http://localhost:3000}
-      WEB_URL: ${WEB_URL:-http://localhost}
-      WHATSAPP_AUTH_PATH: ${WHATSAPP_AUTH_PATH:-/app/storage/whatsapp-auth}
-    ports:
-      - ${WEB_PORT:-80}:3000
-    command: npm run production
-    depends_on:
-      - api
+    web:
+        build: ./web
+        restart: unless-stopped
+        working_dir: /app
+        env_file:
+            - .env
+        command: npm run production
+        depends_on:
+            - api
 
-  mysql:
-    image: mysql:8.2
-    restart: unless-stopped
-    environment:
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-    ports:
-      - ${MYSQL_PUBLIC_PORT:-3306}:3306
-    volumes:
-      - mysql:/var/lib/mysql
-      - ./api/data/mysql:/docker-entrypoint-initdb.d:ro
+    mysql:
+        image: mysql:8.2
+        restart: unless-stopped
+        environment:
+            MYSQL_DATABASE: ${MYSQL_DATABASE}
+            MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+        volumes:
+            - mysql:/var/lib/mysql
 
 volumes:
-  mysql:
-  whatsapp_auth:
+    mysql:
+    whatsapp_auth:

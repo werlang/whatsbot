@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { appConfig } from "../config/app-config.js";
+import { appConfig } from '../config/app-config.js';
 import { ScheduledMessage } from "../model/scheduled-message.js";
 import { whatsappClientManager } from "../services/whatsapp-client-manager.js";
 

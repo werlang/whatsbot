@@ -1,7 +1,18 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import QRCode from "qrcode";
 import WhatsAppWeb from "whatsapp-web.js";
-import { appConfig } from "../config/app-config.js";
+import { appConfig } from '../config/app-config.js';
 import { normalizePhoneNumber, toWhatsAppChatId } from "../helpers/phone-number.js";
+
+const CHROMIUM_SINGLETON_ARTIFACTS = [
+    "SingletonCookie",
+    "SingletonLock",
+    "SingletonSocket",
+    "DevToolsActivePort",
+];
+
+const BRAZIL_COUNTRY_CODE = "55";
 
 /**
  * Manages the single whatsapp-web.js client used by the API runtime.
@@ -51,6 +62,42 @@ class WhatsAppClientManager {
             disconnectReason: null,
         });
 
+        this.initializingPromise = this.initializeClient()
+            .catch(error => {
+                this.captureError(error, { status: "error" });
+                this.client = null;
+                throw error;
+            })
+            .finally(() => {
+                this.initializingPromise = null;
+            });
+
+        return this.initializingPromise;
+    }
+
+    /**
+     * Creates, boots, and recovers the WhatsApp client from stale Chromium locks.
+     */
+    async initializeClient() {
+        try {
+            return await this.bootClient();
+        } catch (error) {
+            if (!this.isChromiumProfileLockError(error)) {
+                throw error;
+            }
+
+            await this.disposeClient();
+            await this.clearChromiumSingletonArtifacts();
+            return this.bootClient();
+        }
+    }
+
+    /**
+     * Creates one WhatsApp client instance and waits for its initialization.
+     */
+    async bootClient() {
+        await this.clearChromiumSingletonArtifacts();
+
         this.client = new Client({
             authStrategy: new LocalAuth({
                 clientId: this.config.clientId,
@@ -64,18 +111,8 @@ class WhatsAppClientManager {
         });
         this.registerLifecycleHandlers();
 
-        this.initializingPromise = this.client.initialize()
-            .then(() => this.client)
-            .catch(error => {
-                this.captureError(error, { status: "error" });
-                this.client = null;
-                throw error;
-            })
-            .finally(() => {
-                this.initializingPromise = null;
-            });
-
-        return this.initializingPromise;
+        await this.client.initialize();
+        return this.client;
     }
 
     /**
@@ -204,8 +241,19 @@ class WhatsAppClientManager {
             throw new Error("WhatsApp client is not ready to send messages.");
         }
 
-        const chatId = toWhatsAppChatId(normalizedPhoneNumber);
-        const sentMessage = await this.client.sendMessage(chatId, normalizedMessage);
+        let chatId = await this.resolveWhatsAppChatId(normalizedPhoneNumber);
+        let sentMessage;
+
+        try {
+            sentMessage = await this.client.sendMessage(chatId, normalizedMessage);
+        } catch (error) {
+            if (!this.isMissingLidError(error)) {
+                throw error;
+            }
+
+            chatId = await this.syncChatForMissingLid(chatId);
+            sentMessage = await this.client.sendMessage(chatId, normalizedMessage);
+        }
 
         return {
             chatId,
@@ -218,6 +266,97 @@ class WhatsAppClientManager {
     }
 
     /**
+     * Resolves the best WhatsApp chat id for one phone number before sending.
+     */
+    async resolveWhatsAppChatId(phoneNumber) {
+        const candidates = this.buildPhoneNumberCandidates(phoneNumber);
+
+        for (const candidate of candidates) {
+            const resolvedNumber = await this.client.getNumberId(candidate);
+
+            if (resolvedNumber?._serialized) {
+                return resolvedNumber._serialized;
+            }
+        }
+
+        throw new Error(`WhatsApp could not resolve a registered account for ${phoneNumber}.`);
+    }
+
+    /**
+     * Syncs a chat through WhatsApp Web internals when a contact is missing its LID.
+     */
+    async syncChatForMissingLid(chatId) {
+        const page = this.client?.pupPage;
+
+        if (!page) {
+            throw new Error(`WhatsApp could not recover the chat for ${chatId}.`);
+        }
+
+        const resolvedChatId = await page.evaluate(async currentChatId => {
+            const requireModule = window.require;
+            const widFactory = requireModule("WAWebWidFactory");
+            const findChatAction = requireModule("WAWebFindChatAction");
+            const contactSyncUtils = requireModule("WAWebContactSyncUtils");
+
+            const originalWid = widFactory.createWid(currentChatId);
+
+            try {
+                const chat = await findChatAction.findOrCreateLatestChat(originalWid);
+                return chat?.chat?.id?._serialized || currentChatId;
+            } catch {
+                const query = contactSyncUtils.constructUsyncDeltaQuery([{
+                    type: "add",
+                    phoneNumber: originalWid.user,
+                }]);
+                const result = await query.execute();
+                const lid = result?.list?.[0]?.lid;
+
+                if (!lid) {
+                    throw new Error(`WhatsApp could not sync contact ${originalWid.user}.`);
+                }
+
+                const lidWid = widFactory.createWid(lid);
+                const chat = await findChatAction.findOrCreateLatestChat(lidWid);
+                return chat?.chat?.id?._serialized || lidWid?._serialized || currentChatId;
+            }
+        }, chatId);
+
+        if (!resolvedChatId) {
+            throw new Error(`WhatsApp could not recover the chat for ${chatId}.`);
+        }
+
+        return resolvedChatId;
+    }
+
+    /**
+     * Builds candidate numbers, including a Brazil mobile 9-digit fallback.
+     */
+    buildPhoneNumberCandidates(phoneNumber) {
+        const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+        const candidates = [normalizedPhoneNumber];
+
+        if (normalizedPhoneNumber.startsWith(BRAZIL_COUNTRY_CODE) && normalizedPhoneNumber.length >= 12) {
+            const countryCode = normalizedPhoneNumber.slice(0, 2);
+            const areaCode = normalizedPhoneNumber.slice(2, 4);
+            const subscriberNumber = normalizedPhoneNumber.slice(4);
+
+            if (subscriberNumber.length === 8) {
+                candidates.push(`${countryCode}${areaCode}9${subscriberNumber}`);
+            }
+
+            if (subscriberNumber.length === 9 && subscriberNumber.startsWith("9")) {
+                candidates.push(`${countryCode}${areaCode}${subscriberNumber.slice(1)}`);
+            }
+
+            if (subscriberNumber.length === 10 && subscriberNumber.startsWith("99")) {
+                candidates.push(`${countryCode}${areaCode}${subscriberNumber.slice(1)}`);
+            }
+        }
+
+        return [...new Set(candidates)].map(toWhatsAppChatId);
+    }
+
+    /**
      * Destroys the current client instance.
      */
     async destroy() {
@@ -225,8 +364,7 @@ class WhatsAppClientManager {
             return;
         }
 
-        await this.client.destroy();
-        this.client = null;
+        await this.disposeClient();
         this.updateState({
             status: "idle",
             ready: false,
@@ -237,6 +375,56 @@ class WhatsAppClientManager {
             clientInfo: null,
             disconnectReason: null,
         });
+    }
+
+    /**
+     * Removes the current client reference after attempting a clean shutdown.
+     */
+    async disposeClient() {
+        if (!this.client) {
+            return;
+        }
+
+        const activeClient = this.client;
+        this.client = null;
+        await activeClient.destroy?.().catch(() => {});
+    }
+
+    /**
+     * Deletes only Chromium lock artifacts from the persisted LocalAuth session.
+     */
+    async clearChromiumSingletonArtifacts() {
+        const sessionPath = path.join(this.config.authPath, `session-${this.config.clientId}`);
+
+        await Promise.all(CHROMIUM_SINGLETON_ARTIFACTS.map(async fileName => {
+            const artifactPath = path.join(sessionPath, fileName);
+
+            try {
+                await fs.rm(artifactPath, { force: true });
+            } catch (error) {
+                if (error?.code !== "ENOENT") {
+                    throw error;
+                }
+            }
+        }));
+    }
+
+    /**
+     * Detects the Chromium profile lock error caused by stale LocalAuth artifacts.
+     */
+    isChromiumProfileLockError(error) {
+        return String(error?.message || error || "")
+            .toLowerCase()
+            .includes("profile appears to be in use");
+    }
+
+    /**
+     * Detects the WhatsApp Web LID-resolution error raised for unknown contacts.
+     */
+    isMissingLidError(error) {
+        return String(error?.message || error || "")
+            .toLowerCase()
+            .includes("no lid for user");
     }
 
     /**
