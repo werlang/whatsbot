@@ -1,0 +1,19 @@
+# Ignore Mac system files
+.DS_Store
+
+# Environment variables and dependencies
+.env
+node_modules
+
+# Service dependencies
+api/node_modules
+web/node_modules
+
+# Test coverage outputs
+**/coverage
+
+# Runtime storage
+api/storage
+
+# Agent workspace
+.agents

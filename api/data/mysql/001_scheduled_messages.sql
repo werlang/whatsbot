@@ -1,0 +1,18 @@
+CREATE TABLE IF NOT EXISTS scheduled_messages (
+    id CHAR(36) NOT NULL PRIMARY KEY,
+    phone_number VARCHAR(32) NOT NULL,
+    message TEXT NOT NULL,
+    scheduled_for DATETIME NOT NULL,
+    status ENUM("pending", "processing", "sent", "failed") NOT NULL DEFAULT "pending",
+    claim_token CHAR(36) DEFAULT NULL,
+    claimed_at DATETIME DEFAULT NULL,
+    last_attempt_at DATETIME DEFAULT NULL,
+    sent_at DATETIME DEFAULT NULL,
+    whatsapp_chat_id VARCHAR(64) DEFAULT NULL,
+    whatsapp_message_id VARCHAR(128) DEFAULT NULL,
+    error_message TEXT DEFAULT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    INDEX idx_scheduled_messages_due (status, scheduled_for),
+    INDEX idx_scheduled_messages_claim_token (claim_token)
+);

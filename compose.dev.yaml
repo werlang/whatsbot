@@ -1,0 +1,62 @@
+services:
+  api:
+    build: ./api
+    restart: unless-stopped
+    working_dir: /app
+    env_file:
+      - .env
+    environment:
+      PORT: 3000
+      MYSQL_HOST: ${MYSQL_HOST:-mysql}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      WHATSAPP_AUTH_PATH: ${WHATSAPP_AUTH_PATH:-/app/storage/whatsapp-auth}
+      PUPPETEER_SKIP_DOWNLOAD: ${PUPPETEER_SKIP_DOWNLOAD:-true}
+      PUPPETEER_EXECUTABLE_PATH: ${PUPPETEER_EXECUTABLE_PATH:-/usr/bin/chromium-browser}
+    volumes:
+      - whatsapp_auth:/app/storage/whatsapp-auth
+      - ./api:/app
+      - node_modules_api:/app/node_modules
+    ports:
+      - ${DEV_API_PORT:-3001}:3000
+      - ${DEV_API_INSPECT_PORT:-9230}:9229
+    command: npm run development
+    depends_on:
+      - mysql
+
+  web:
+    build: ./web
+    restart: unless-stopped
+    working_dir: /app
+    env_file:
+      - .env
+    environment:
+      PORT: 3000
+      API_URL: ${DEV_API_URL:-http://localhost:3001}
+      WEB_URL: ${DEV_WEB_URL:-http://localhost:8080}
+      WHATSAPP_AUTH_PATH: ${WHATSAPP_AUTH_PATH:-/app/storage/whatsapp-auth}
+    volumes:
+      - ./web:/app
+      - node_modules_web:/app/node_modules
+    ports:
+      - ${DEV_WEB_PORT:-8080}:3000
+    command: npm run development
+    depends_on:
+      - api
+
+  mysql:
+    image: mysql:8.2
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    ports:
+      - ${DEV_MYSQL_PUBLIC_PORT:-3307}:3306
+    volumes:
+      - mysql:/var/lib/mysql
+      - ./api/data/mysql:/docker-entrypoint-initdb.d:ro
+
+volumes:
+  mysql:
+  whatsapp_auth:
+  node_modules_api:
+  node_modules_web:

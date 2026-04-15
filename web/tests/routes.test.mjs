@@ -1,0 +1,44 @@
+import assert from "node:assert/strict";
+import { once } from "node:events";
+import test from "node:test";
+import { createApp } from "../app.js";
+
+/**
+ * Starts the web app on an ephemeral port for smoke testing.
+ */
+async function startTestServer() {
+    const server = createApp().listen(0, "127.0.0.1");
+    await once(server, "listening");
+    return server;
+}
+
+/**
+ * Closes a Node HTTP server and waits for shutdown completion.
+ */
+async function stopTestServer(server) {
+    await new Promise((resolve, reject) => {
+        server.close(err => err ? reject(err) : resolve());
+    });
+}
+
+test("GET / renders the scheduler UI shell", async () => {
+    const server = await startTestServer();
+    const { port } = server.address();
+
+    try {
+        const response = await fetch("http://127.0.0.1:" + port + "/");
+        const body = await response.text();
+
+        assert.equal(response.status, 200);
+        assert.match(body, /Schedule one WhatsApp message\./);
+        assert.match(body, /id="schedule-form"/);
+        assert.match(body, /id="phone-number"/);
+        assert.match(body, /id="message"/);
+        assert.match(body, /id="scheduled-for"/);
+        assert.match(body, /WhatsApp session/);
+        assert.match(body, /id="session-status"/);
+        assert.match(body, /Schedule message/);
+    } finally {
+        await stopTestServer(server);
+    }
+});

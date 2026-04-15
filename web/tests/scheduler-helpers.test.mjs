@@ -1,0 +1,47 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+    convertDateTimeLocalToOffsetIso,
+    createDefaultScheduledDateTime,
+} from "../public/js/helpers/datetime.js";
+import { describeSession } from "../public/js/helpers/session.js";
+
+test("convertDateTimeLocalToOffsetIso returns a timezone-aware ISO timestamp", () => {
+    const iso = convertDateTimeLocalToOffsetIso("2026-04-15T18:30");
+    const parsed = new Date(iso);
+
+    assert.match(iso, /^2026-04-15T18:30:00[+-]\d{2}:\d{2}$/);
+    assert.equal(parsed.getFullYear(), 2026);
+    assert.equal(parsed.getMonth() + 1, 4);
+    assert.equal(parsed.getDate(), 15);
+    assert.equal(parsed.getHours(), 18);
+    assert.equal(parsed.getMinutes(), 30);
+});
+
+test("createDefaultScheduledDateTime returns a datetime-local friendly value", () => {
+    const value = createDefaultScheduledDateTime(new Date(2026, 3, 15, 18, 30, 40));
+    assert.match(value, /^2026-04-15T18:35$/);
+});
+
+test("describeSession highlights QR pairing without blocking future scheduling", () => {
+    const summary = describeSession({
+        status: "qr",
+        ready: false,
+        authenticated: false,
+        hasQrCode: true,
+        qrCodeDataUrl: "data:image/png;base64,abc123",
+        connectionState: "OPENING",
+        loading: {
+            percent: 42,
+            message: "Booting",
+        },
+        lastEventAt: "2026-04-15T12:00:00.000Z",
+    });
+
+    assert.equal(summary.label, "Pairing required");
+    assert.equal(summary.tone, "warning");
+    assert.equal(summary.showQr, true);
+    assert.match(summary.note, /still schedule future messages/i);
+    assert.match(summary.connection, /42%/);
+    assert.match(summary.lastEventLabel, /Last update:/);
+});
