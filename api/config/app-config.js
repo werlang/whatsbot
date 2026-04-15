@@ -21,8 +21,8 @@ function readInteger(value, fallback) {
  */
 function createAppConfig(env = process.env) {
     return {
-        host: env.API_HOST || '0.0.0.0',
-        port: readInteger(env.API_PORT, 3000),
+        host: '0.0.0.0',
+        port: readInteger(3000),
         mysql: {
             database: env.MYSQL_DATABASE || 'whatsbot',
         },
@@ -32,10 +32,10 @@ function createAppConfig(env = process.env) {
             claimTimeoutMs: Math.max(readInteger(env.SCHEDULER_CLAIM_TIMEOUT_MS, 10 * 60 * 1000), 1000),
         },
         whatsapp: {
-            clientId: env.WHATSAPP_CLIENT_ID || 'main',
-            authPath: env.WHATSAPP_AUTH_PATH || '/app/storage/whatsapp-auth',
-            puppeteerArgs: readList(env.WHATSAPP_PUPPETEER_ARGS || '--no-sandbox,--disable-setuid-sandbox'),
-            executablePath: env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser',
+            clientId: 'main',
+            authPath: '/whatsapp/auth',
+            puppeteerArgs: readList('--no-sandbox,--disable-setuid-sandbox'),
+            executablePath: '/usr/bin/chromium-browser',
         },
     };
 }
