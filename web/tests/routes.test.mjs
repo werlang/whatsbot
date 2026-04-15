@@ -42,3 +42,21 @@ test("GET / renders the scheduler UI shell", async () => {
         await stopTestServer(server);
     }
 });
+
+test("GET /login renders the session pairing flow", async () => {
+    const server = await startTestServer();
+    const { port } = server.address();
+
+    try {
+        const response = await fetch("http://127.0.0.1:" + port + "/login");
+        const body = await response.text();
+
+        assert.equal(response.status, 200);
+        assert.match(body, /Create one WhatsApp app session\./);
+        assert.match(body, /id="create-session-button"/);
+        assert.match(body, /Pairing status/);
+        assert.match(body, /id="session-status"/);
+    } finally {
+        await stopTestServer(server);
+    }
+});

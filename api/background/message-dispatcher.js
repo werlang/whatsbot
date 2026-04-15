@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { appConfig } from '../config/app-config.js';
 import { ScheduledMessage } from "../model/scheduled-message.js";
-import { whatsappClientManager } from "../services/whatsapp-client-manager.js";
+import { whatsappSessionManager } from "../services/whatsapp-session-manager.js";
 
 /**
  * Polls due scheduled messages and delivers them through WhatsApp.
@@ -9,7 +9,7 @@ import { whatsappClientManager } from "../services/whatsapp-client-manager.js";
 class MessageDispatcher {
     constructor({
         scheduledMessageModel = ScheduledMessage,
-        whatsappClient = whatsappClientManager,
+        whatsappClient = whatsappSessionManager,
         pollIntervalMs = appConfig.scheduler.pollIntervalMs,
         batchSize = appConfig.scheduler.batchSize,
         claimTimeoutMs = appConfig.scheduler.claimTimeoutMs,
@@ -63,7 +63,9 @@ class MessageDispatcher {
      * Processes one dispatcher cycle when the WhatsApp client is ready.
      */
     async tick() {
-        if (this.running || !this.whatsappClient?.isReady()) {
+        const readySessionIds = this.whatsappClient?.getReadySessionIds?.() || [];
+
+        if (this.running || readySessionIds.length === 0) {
             return 0;
         }
 
@@ -75,6 +77,7 @@ class MessageDispatcher {
                 limit: this.batchSize,
                 claimToken: crypto.randomUUID(),
                 reclaimAfterMs: this.claimTimeoutMs,
+                sessionIds: readySessionIds,
             });
 
             for (const scheduledMessage of dueMessages) {
@@ -92,7 +95,11 @@ class MessageDispatcher {
      */
     async dispatchScheduledMessage(scheduledMessage) {
         try {
-            const result = await this.whatsappClient.sendMessage(scheduledMessage.phoneNumber, scheduledMessage.message);
+            const result = await this.whatsappClient.sendMessage(
+                scheduledMessage.sessionId,
+                scheduledMessage.phoneNumber,
+                scheduledMessage.message,
+            );
             await this.scheduledMessageModel.markSent(scheduledMessage.id, {
                 whatsappChatId: result.chatId,
                 whatsappMessageId: result.whatsappMessageId,

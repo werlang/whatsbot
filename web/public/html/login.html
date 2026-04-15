@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{metaTitle}}</title>
+    <meta name="description" content="{{metaDescription}}">
+    <link rel="canonical" href="{{webUrl}}{{canonicalPath}}">
+    <link rel="stylesheet" href="/css/index.css">
+    <script type="module" src="/js/login.js"></script>
+</head>
+
+<body>
+    <main class="page-shell">
+        <section class="hero">
+            <span class="hero__eyebrow">WhatsBot Login</span>
+            <h1>{{heading}}</h1>
+            <p>{{intro}}</p>
+            <p class="hero__hint">Each session created here uses its own WhatsApp Web pairing and can schedule commands independently.</p>
+        </section>
+
+        <div class="layout">
+            <section class="panel panel--form" aria-labelledby="login-title">
+                <div class="panel__header">
+                    <div>
+                        <h2 id="login-title">Create session</h2>
+                        <p>Generate one session id, then pair it by scanning the QR code from your phone.</p>
+                    </div>
+                </div>
+
+                <div class="feedback" id="login-feedback" data-role="login-feedback" hidden aria-live="polite"></div>
+
+                <p class="form__hint">Refreshing this page with the same <code>sessionId</code> query parameter reopens the same session view.</p>
+                <p class="form__hint form__hint--muted" data-role="session-id-panel" hidden>Active session: <strong data-role="session-id">-</strong></p>
+
+                <button class="button" id="create-session-button" type="button">Create WhatsApp session</button>
+                <p class="form__hint form__hint--muted">After pairing, messages sent to your own chat with <code>@whatsbot</code> can create scheduled deliveries for this session.</p>
+            </section>
+
+            <aside class="panel panel--session" aria-labelledby="session-title">
+                <div class="panel__header">
+                    <div>
+                        <h2 id="session-title">Pairing status</h2>
+                        <p>Watch the QR and connection state for the active session.</p>
+                    </div>
+                </div>
+
+                <div class="session-card">
+                    <p class="session-card__status">
+                        <span>Status</span>
+                        <strong id="session-status" data-role="session-status">Waiting for session creation…</strong>
+                    </p>
+                    <p class="session-card__meta" id="session-connection" data-role="session-connection">Create a session to start pairing WhatsApp Web.</p>
+                    <p class="session-card__note" id="session-note" data-role="session-note">Once this session is ready, self-messages beginning with <code>@whatsbot</code> will be interpreted as scheduling commands.</p>
+                    <p class="session-card__meta" id="session-last-event" data-role="session-last-event" hidden></p>
+                    <p class="session-card__meta" id="session-client-info" data-role="session-client-info" hidden></p>
+                </div>
+
+                <figure class="qr-panel" id="session-qr-panel" data-role="session-qr-panel" hidden>
+                    <img id="session-qr-image" data-role="session-qr-image" alt="WhatsApp QR code for pairing this login session">
+                    <figcaption>Scan this QR code with WhatsApp on your phone to connect this app session.</figcaption>
+                </figure>
+
+                <p class="session-card__meta"><a data-role="scheduler-link" href="/" hidden>Open the scheduler for this session</a></p>
+                <p class="session-card__meta">API base URL: <code>{{apiUrl}}</code></p>
+            </aside>
+        </div>
+
+        <p class="footer-note">&copy; <span data-role="year">{{year}}</span> {{siteName}}</p>
+    </main>
+    {{{template-vars}}}
+</body>
+
+</html>

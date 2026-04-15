@@ -64,10 +64,69 @@ test("POST /messages creates one scheduled message with normalized fields", asyn
 
         assert.equal(response.status, 201);
         assert.equal(payload.error, false);
+        assert.equal(payload.data.scheduledMessage.sessionId, "main");
         assert.equal(payload.data.scheduledMessage.phoneNumber, "5551999999999");
         assert.equal(payload.data.scheduledMessage.message, "hello world");
         assert.equal(payload.data.scheduledMessage.scheduledFor, "2026-04-15T21:30:00.000Z");
         assert.equal(payload.data.scheduledMessage.status, "pending");
+    } finally {
+        await stopTestServer(server);
+    }
+});
+
+test("POST /messages accepts an explicit session id", async () => {
+    let createdPayload = null;
+    const scheduledMessageModel = {
+        async create(payload) {
+            createdPayload = payload;
+            return {
+                id: "msg-2",
+                ...payload,
+                status: "pending",
+                claimToken: null,
+                claimedAt: null,
+                lastAttemptAt: null,
+                sentAt: null,
+                whatsappChatId: null,
+                whatsappMessageId: null,
+                errorMessage: null,
+                createdAt: "2026-04-15T12:00:00.000Z",
+                updatedAt: "2026-04-15T12:00:00.000Z",
+            };
+        },
+    };
+    const whatsappClient = {
+        getDefaultSessionId() {
+            return "main";
+        },
+        getKnownSessionState() {
+            return { status: "idle" };
+        },
+        getActiveSessionCount() {
+            return 0;
+        },
+    };
+    const server = await startTestServer({ scheduledMessageModel, whatsappClient });
+    const { port } = server.address();
+
+    try {
+        const response = await fetch(`http://127.0.0.1:${port}/messages`, {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+            },
+            body: JSON.stringify({
+                sessionId: "sales-team",
+                phoneNumber: "5551999999999",
+                message: "hello world",
+                scheduledFor: "2026-04-15T18:30:00Z",
+            }),
+        });
+        const payload = await response.json();
+
+        assert.equal(response.status, 201);
+        assert.equal(createdPayload.sessionId, "sales-team");
+        assert.equal(payload.data.scheduledMessage.sessionId, "sales-team");
     } finally {
         await stopTestServer(server);
     }

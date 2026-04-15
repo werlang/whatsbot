@@ -28,27 +28,47 @@ The API uses:
 Current HTTP routes:
 
 - `POST /messages`
-  - body: `{ phoneNumber, message, scheduledFor }`
+  - body: `{ sessionId?, phoneNumber, message, scheduledFor }`
   - `scheduledFor` must include timezone information
+  - `sessionId` defaults to `main` when omitted
   - returns the created scheduled message in the standard envelope
 - `GET /whatsapp/session`
-  - returns current WhatsApp client/session state, including QR data when pairing is required
+  - accepts optional `sessionId` query string and returns the current session state, including QR data when pairing is required
+- `POST /whatsapp/sessions`
+  - creates one new WhatsApp app session with its own `LocalAuth` profile
+- `GET /whatsapp/sessions/:sessionId`
+  - returns the current state for a specific app session
 - `GET /ready`
   - readiness payload for the API runtime
 
-The dispatcher only sends due messages when the WhatsApp client is ready. Messages can still be queued before pairing is complete.
+The dispatcher only sends due messages when their owning WhatsApp session is ready. Messages remain pending if their session is still waiting for pairing or temporarily disconnected.
+
+Self-command scheduling is also supported per session. When a paired user sends a message to their own chat in the format below, the API converts it into a scheduled message owned by that session:
+
+```text
+@whatsbot <recipient> <scheduled_datetime> <message>
+```
+
+Example:
+
+```text
+@whatsbot 5551997771055 2026-04-15-19-20-30 teste message
+```
+
+The `scheduled_datetime` token currently uses the API runtime local timezone and is persisted in UTC.
 
 ### Web
 
 The web service uses:
 
 - Express 5 + Mustache SSR
-- one page at `/`
+- a scheduler page at `/`
+- a dedicated login and pairing page at `/login`
 - direct static assets from `web/public/css` and `web/public/js`
-- browser-side polling of `GET /whatsapp/session`
+- browser-side polling of `GET /whatsapp/session` or `GET /whatsapp/sessions/:sessionId`
 - browser-side submission to `POST /messages`
 
-The browser converts `datetime-local` input into a timezone-aware ISO timestamp before posting to the API.
+The browser converts `datetime-local` input into a timezone-aware ISO timestamp before posting to the API. The active scheduler session is taken from the `sessionId` query string or browser storage.
 
 ## Docker Compose workflow
 
@@ -83,8 +103,10 @@ docker compose -f compose.dev.yaml up --build
 Current development URLs and ports:
 
 - Web: `http://localhost`
+- Web login flow: `http://localhost/login`
 - API ready check: `http://localhost:3000/ready`
 - API session check: `http://localhost:3000/whatsapp/session`
+- API session creation: `http://localhost:3000/whatsapp/sessions`
 - MySQL host port: `3306`
 - Node inspector: `9229`
 
@@ -105,18 +127,32 @@ Typical local flow:
   docker compose -f compose.dev.yaml up --build
   ```
 
-2. Open `http://localhost`.
+2. Open `http://localhost/login` to create and pair a session, or `http://localhost` if you already have a session id.
 
 3. Wait for the session panel to show a QR code, then scan it with WhatsApp on your phone.
+
+4. After pairing, use `/?sessionId=<your-session-id>` for session-specific manual scheduling, or send `@whatsbot` commands to your own chat from that same account.
 
 ## Persistence and runtime caveats
 
 - **MySQL** stores scheduled messages and delivery lifecycle data.
 - **`whatsapp_auth` named volume** persists the `LocalAuth` session directory mounted at `/whatsapp/auth`, so QR pairing survives container recreation.
+- Schema changes must be applied explicitly through a planned migration workflow. The application must not patch or evolve the database schema at startup.
+- The SQL files under `api/data/mysql/` are schema artifacts, not a runtime migration engine. Provisioning and deployment must execute the appropriate schema or migration steps outside the API process.
+- Existing environments created before the multi-session change must apply [api/data/mysql/migrations/20260415_add_session_id_to_scheduled_messages.sql](/Users/pablowerlang/Documents/Workspaces/whatsbot/api/data/mysql/migrations/20260415_add_session_id_to_scheduled_messages.sql) manually before running the updated API.
 - If the WhatsApp session becomes invalid, you may need to re-pair by scanning a new QR code.
 - The API image installs Chromium because `whatsapp-web.js` needs a browser runtime inside Docker.
 - The scheduler stores `scheduledFor` timestamps in UTC after validating timezone-aware input.
+- Each scheduled message belongs to one app session via `sessionId`.
 - The dispatcher polls every `SCHEDULER_POLL_INTERVAL_MS` milliseconds and claims work in small batches.
+
+For local development with Docker Compose, one explicit way to apply the current migration is:
+
+```bash
+docker compose exec -T mysql sh -lc 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" < /tmp/20260415_add_session_id.sql'
+```
+
+Copy the migration file into the container or pipe it on stdin as part of your deployment or local setup workflow. Keep that step outside the API startup path.
 
 Current hardcoded API runtime defaults:
 

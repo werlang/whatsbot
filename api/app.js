@@ -10,7 +10,7 @@ import { errorMiddleware } from './middleware/error.js';
 import { ScheduledMessage } from './model/scheduled-message.js';
 import { createMessagesRouter } from './routes/messages.js';
 import { createWhatsAppRouter } from './routes/whatsapp.js';
-import { whatsappClientManager } from './services/whatsapp-client-manager.js';
+import { whatsappSessionManager } from './services/whatsapp-session-manager.js';
 
 const { host, port } = appConfig;
 
@@ -19,7 +19,7 @@ const { host, port } = appConfig;
  */
 function createApp({
     scheduledMessageModel = ScheduledMessage,
-    whatsappClient = whatsappClientManager,
+    whatsappClient = whatsappSessionManager,
 } = {}) {
     const app = express();
 
@@ -39,9 +39,10 @@ function createApp({
                 scheduler: appConfig.scheduler,
                 whatsapp: {
                     authPath: appConfig.whatsapp.authPath,
-                    clientId: appConfig.whatsapp.clientId,
+                    clientId: whatsappClient.getDefaultSessionId?.() || appConfig.whatsapp.clientId,
                     puppeteerArgs: appConfig.whatsapp.puppeteerArgs,
-                    sessionStatus: whatsappClient.getSessionState().status,
+                    activeSessionCount: whatsappClient.getActiveSessionCount?.() || 0,
+                    sessionStatus: whatsappClient.getKnownSessionState?.().status || "idle",
                 },
             },
             message: 'WhatsBot API is ready.',
@@ -64,7 +65,7 @@ let shutdownHandlersRegistered = false;
  */
 async function start({
     mysqlDriver = Mysql,
-    whatsappClient = whatsappClientManager,
+    whatsappClient = whatsappSessionManager,
     dispatcher = messageDispatcher,
 } = {}) {
     await mysqlDriver.waitForReady();

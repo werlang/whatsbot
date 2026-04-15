@@ -9,6 +9,7 @@ class ScheduledMessage extends Model {
     static table = "scheduled_messages";
     static view = [
         "id",
+        "session_id",
         "phone_number",
         "message",
         "scheduled_for",
@@ -35,6 +36,7 @@ class ScheduledMessage extends Model {
      */
     constructor({
         id,
+        sessionId,
         phoneNumber,
         message,
         scheduledFor,
@@ -51,6 +53,7 @@ class ScheduledMessage extends Model {
     } = {}) {
         super();
         this.id = id || crypto.randomUUID();
+        this.sessionId = String(sessionId || "main").trim() || "main";
         this.phoneNumber = normalizePhoneNumber(phoneNumber);
         this.message = String(message ?? "").trim();
         this.scheduledFor = new Date(scheduledFor).toISOString();
@@ -72,6 +75,7 @@ class ScheduledMessage extends Model {
     toJSON() {
         return {
             id: this.id,
+            sessionId: this.sessionId,
             phoneNumber: this.phoneNumber,
             message: this.message,
             scheduledFor: this.scheduledFor,
@@ -108,6 +112,7 @@ class ScheduledMessage extends Model {
 
         return {
             id: row.id,
+            sessionId: row.sessionId || row.session_id || "main",
             phoneNumber: normalizePhoneNumber(row.phoneNumber || row.phone_number),
             message: row.message,
             scheduledFor: row.scheduledFor || row.scheduled_for
@@ -146,6 +151,7 @@ class ScheduledMessage extends Model {
 
         return {
             id: scheduledMessage.id,
+            session_id: scheduledMessage.sessionId,
             phone_number: scheduledMessage.phoneNumber,
             message: scheduledMessage.message,
             scheduled_for: this.driver.toDateTime(scheduledMessage.scheduledFor),
@@ -218,10 +224,19 @@ class ScheduledMessage extends Model {
         limit = 5,
         claimToken = crypto.randomUUID(),
         reclaimAfterMs = this.DEFAULT_RECLAIM_AFTER_MS,
+        sessionIds = [],
     } = {}) {
         const claimTime = new Date(now);
         const boundedLimit = Math.max(1, Number.parseInt(limit, 10) || 5);
         const boundedReclaimAfterMs = Math.max(Number(reclaimAfterMs) || this.DEFAULT_RECLAIM_AFTER_MS, 1000);
+        const normalizedSessionIds = [...new Set((Array.isArray(sessionIds) ? sessionIds : [sessionIds])
+            .map(sessionId => String(sessionId ?? "").trim())
+            .filter(Boolean))];
+
+        if (normalizedSessionIds.length === 0) {
+            return [];
+        }
+
         const dueAt = this.driver.toDateTime(claimTime);
         const claimedAt = this.driver.toDateTime(claimTime);
         const reclaimBefore = this.driver.toDateTime(new Date(claimTime.getTime() - boundedReclaimAfterMs));
@@ -237,10 +252,11 @@ class ScheduledMessage extends Model {
             const [pendingRows, staleProcessingRows] = await Promise.all([
                 this.driver.find(this.table, {
                     filter: {
+                        session_id: normalizedSessionIds,
                         scheduled_for: this.driver.lte(dueAt),
                         status: this.STATUS_PENDING,
                     },
-                    view: ["id", "scheduled_for", "status", "claimed_at"],
+                    view: ["id", "session_id", "scheduled_for", "status", "claimed_at"],
                     opt: {
                         order: { scheduled_for: 1 },
                         limit: boundedLimit,
@@ -249,11 +265,12 @@ class ScheduledMessage extends Model {
                 }),
                 this.driver.find(this.table, {
                     filter: {
+                        session_id: normalizedSessionIds,
                         scheduled_for: this.driver.lte(dueAt),
                         status: this.STATUS_PROCESSING,
                         claimed_at: this.driver.lte(reclaimBefore),
                     },
-                    view: ["id", "scheduled_for", "status", "claimed_at"],
+                    view: ["id", "session_id", "scheduled_for", "status", "claimed_at"],
                     opt: {
                         order: { scheduled_for: 1 },
                         limit: boundedLimit,

@@ -3,12 +3,14 @@ import { normalizeScheduledFor } from "../helpers/date.js";
 import { HttpError } from "../helpers/error.js";
 import { normalizePhoneNumber } from "../helpers/phone-number.js";
 import { sendCreated } from "../helpers/response.js";
+import { normalizeSessionId } from "../helpers/session.js";
 import { ScheduledMessage } from "../model/scheduled-message.js";
 
 /**
  * Validates and normalizes the schedule payload accepted by POST /messages.
  */
 function parseScheduledMessagePayload(payload = {}) {
+    const sessionId = normalizeSessionId(payload.sessionId, { fallback: "main" });
     const phoneNumber = normalizePhoneNumber(payload.phoneNumber);
     const message = String(payload.message ?? "").trim();
 
@@ -17,6 +19,7 @@ function parseScheduledMessagePayload(payload = {}) {
     }
 
     return {
+        sessionId,
         phoneNumber,
         message,
         scheduledFor: normalizeScheduledFor(payload.scheduledFor),

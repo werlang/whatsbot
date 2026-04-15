@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS scheduled_messages (
     id CHAR(36) NOT NULL PRIMARY KEY,
+    session_id VARCHAR(64) NOT NULL DEFAULT 'main',
     phone_number VARCHAR(32) NOT NULL,
     message TEXT NOT NULL,
     scheduled_for DATETIME NOT NULL,

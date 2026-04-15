@@ -8,6 +8,7 @@ import {
     toDateTimeLocalValue,
 } from "./helpers/datetime.js";
 import { describeSession } from "./helpers/session.js";
+import { resolveActiveSessionId } from "./helpers/session-id.js";
 
 const SESSION_REFRESH_INTERVAL_MS = 15000;
 
@@ -30,6 +31,7 @@ function createElements() {
         sessionQrPanel: document.querySelector("#session-qr-panel"),
         sessionQrImage: document.querySelector("#session-qr-image"),
         timezoneLabel: document.querySelector("[data-role=timezone-label]"),
+        activeSessionId: document.querySelector("[data-role=active-session-id]"),
         year: document.querySelector("[data-role=year]"),
     };
 }
@@ -62,9 +64,13 @@ function readResponseMessage(response, fallbackMessage) {
 /**
  * Applies the initial browser-local scheduling hints.
  */
-function hydrateFormDefaults(elements) {
+function hydrateFormDefaults(elements, sessionId) {
     if (elements.year) {
         elements.year.textContent = TemplateVar.get("year") || String(new Date().getFullYear());
+    }
+
+    if (elements.activeSessionId) {
+        elements.activeSessionId.textContent = sessionId;
     }
 
     if (elements.timezoneLabel) {
@@ -118,8 +124,8 @@ function renderSessionState(elements, description) {
 /**
  * Loads the latest WhatsApp session state from the API.
  */
-async function loadSessionState(elements) {
-    const response = await requestApi("/whatsapp/session");
+async function loadSessionState(elements, sessionId) {
+    const response = await requestApi(`/whatsapp/session?sessionId=${encodeURIComponent(sessionId)}`);
     if (!response.ok || !response.data || !response.data.session) {
         renderSessionState(elements, {
             label: "Unavailable",
@@ -140,7 +146,7 @@ async function loadSessionState(elements) {
 /**
  * Schedules one message through POST /messages.
  */
-async function submitSchedule(event, elements) {
+async function submitSchedule(event, elements, sessionId) {
     event.preventDefault();
 
     if (!elements.form || !elements.submitButton) {
@@ -154,6 +160,7 @@ async function submitSchedule(event, elements) {
         const response = await requestApi("/messages", {
             method: "POST",
             body: {
+                sessionId,
                 phoneNumber: elements.phoneNumber?.value.trim(),
                 message: elements.message?.value.trim(),
                 scheduledFor: convertDateTimeLocalToOffsetIso(elements.scheduledFor?.value),
@@ -201,14 +208,16 @@ function initSchedulerPage() {
         return;
     }
 
-    hydrateFormDefaults(elements);
-    loadSessionState(elements);
+    const activeSessionId = resolveActiveSessionId();
+
+    hydrateFormDefaults(elements, activeSessionId);
+    loadSessionState(elements, activeSessionId);
     globalThis.setInterval(function() {
-        loadSessionState(elements);
+        loadSessionState(elements, activeSessionId);
     }, SESSION_REFRESH_INTERVAL_MS);
 
     elements.form.addEventListener("submit", function(event) {
-        submitSchedule(event, elements);
+        submitSchedule(event, elements, activeSessionId);
     });
 }
 

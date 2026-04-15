@@ -4,6 +4,7 @@ import QRCode from "qrcode";
 import WhatsAppWeb from "whatsapp-web.js";
 import { appConfig } from '../config/app-config.js';
 import { normalizePhoneNumber, toWhatsAppChatId } from "../helpers/phone-number.js";
+import { isWhatsBotCommand } from "./whatsapp-command.js";
 
 const CHROMIUM_SINGLETON_ARTIFACTS = [
     "SingletonCookie",
@@ -20,8 +21,15 @@ const BRAZIL_COUNTRY_CODE = "55";
 const { Client, LocalAuth } = WhatsAppWeb;
 
 class WhatsAppClientManager {
-    constructor(config = appConfig.whatsapp) {
+    constructor(config = appConfig.whatsapp, {
+        logger = console,
+        onSelfCommand = null,
+        buildSelfCommandErrorReply = null,
+    } = {}) {
         this.config = config;
+        this.logger = logger;
+        this.onSelfCommand = onSelfCommand;
+        this.buildSelfCommandErrorReply = buildSelfCommandErrorReply;
         this.client = null;
         this.initializingPromise = null;
         this.state = {
@@ -205,6 +213,86 @@ class WhatsAppClientManager {
                 },
             });
         });
+
+        this.client.on("message_create", message => {
+            this.handleCreatedMessage(message).catch(error => {
+                this.logger.error(`Failed to process message command for session ${this.config.clientId}:`, error);
+            });
+        });
+    }
+
+    /**
+     * Handles one created WhatsApp message and schedules commands sent to self.
+     */
+    async handleCreatedMessage(message) {
+        if (!message?.fromMe || !isWhatsBotCommand(message.body) || !this.onSelfCommand) {
+            return null;
+        }
+
+        if (!await this.isSelfChatMessage(message)) {
+            return null;
+        }
+
+        try {
+            const result = await this.onSelfCommand({
+                sessionId: this.config.clientId,
+                body: String(message.body || ""),
+                source: {
+                    whatsappMessageId: message.id?._serialized || null,
+                    chatId: message.to || message.from || message.id?.remote || null,
+                },
+            });
+
+            if (result?.reply && typeof message.reply === "function") {
+                await message.reply(result.reply);
+            }
+
+            return result;
+        } catch (error) {
+            if (typeof message.reply === "function") {
+                await message.reply(this.readCommandErrorReply(error)).catch(() => {});
+            }
+
+            throw error;
+        }
+    }
+
+    /**
+     * Returns true when a created message belongs to the user's self chat.
+     */
+    async isSelfChatMessage(message) {
+        const ownWid = this.readClientInfo()?.wid;
+
+        if (!ownWid) {
+            return false;
+        }
+
+        const chatId = typeof message._getChatId === "function"
+            ? message._getChatId()
+            : null;
+
+        if (
+            message.to === ownWid
+            || message.from === ownWid
+            || message.id?.remote === ownWid
+            || chatId === ownWid
+        ) {
+            return true;
+        }
+
+        const chat = await message.getChat?.().catch?.(() => null);
+        return chat?.id?._serialized === ownWid;
+    }
+
+    /**
+     * Builds one safe error reply for a failed command parse or schedule.
+     */
+    readCommandErrorReply(error) {
+        if (typeof this.buildSelfCommandErrorReply === "function") {
+            return this.buildSelfCommandErrorReply(error);
+        }
+
+        return String(error?.message || error || "Could not schedule the command.");
     }
 
     /**

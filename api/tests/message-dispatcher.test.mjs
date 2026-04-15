@@ -9,6 +9,7 @@ test("MessageDispatcher claims due messages and marks successful sends", async (
         async claimDue() {
             return [{
                 id: "msg-1",
+                sessionId: "alpha",
                 phoneNumber: "5551999999999",
                 message: "hello world",
             }];
@@ -21,11 +22,11 @@ test("MessageDispatcher claims due messages and marks successful sends", async (
         },
     };
     const whatsappClient = {
-        isReady() {
-            return true;
+        getReadySessionIds() {
+            return ["alpha"];
         },
-        async sendMessage(phoneNumber, message) {
-            sent.push({ phoneNumber, message });
+        async sendMessage(sessionId, phoneNumber, message) {
+            sent.push({ sessionId, phoneNumber, message });
             return {
                 chatId: "5551999999999@c.us",
                 whatsappMessageId: "wamid-1",
@@ -45,6 +46,7 @@ test("MessageDispatcher claims due messages and marks successful sends", async (
 
     assert.equal(processedCount, 1);
     assert.deepEqual(sent, [{
+        sessionId: "alpha",
         phoneNumber: "5551999999999",
         message: "hello world",
     }]);
@@ -69,8 +71,8 @@ test("MessageDispatcher forwards the reclaim timeout when claiming due messages"
         async markFailed() {},
     };
     const whatsappClient = {
-        isReady() {
-            return true;
+        getReadySessionIds() {
+            return ["alpha", "beta"];
         },
     };
     const dispatcher = new MessageDispatcher({
@@ -88,6 +90,7 @@ test("MessageDispatcher forwards the reclaim timeout when claiming due messages"
     assert.equal(processedCount, 0);
     assert.equal(claimOptions.limit, 3);
     assert.equal(claimOptions.reclaimAfterMs, 120000);
+    assert.deepEqual(claimOptions.sessionIds, ["alpha", "beta"]);
     assert.ok(claimOptions.now instanceof Date);
     assert.match(claimOptions.claimToken, /^[0-9a-f-]{36}$/i);
 });

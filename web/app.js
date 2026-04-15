@@ -46,6 +46,19 @@ function createApp() {
     });
 
     /**
+     * Renders the dedicated WhatsApp login and pairing flow.
+     */
+    application.get('/login', (req, res) => {
+        res.templateRender('login', {
+            metaTitle: 'WhatsBot · Login',
+            metaDescription: 'Create one WhatsApp session, scan the QR code, and pair this app session without opening the scheduler UI.',
+            canonicalPath: '/login',
+            heading: 'Create one WhatsApp app session.',
+            intro: 'Use this page to create and pair an isolated WhatsApp session for one person. Each session can later schedule messages independently.',
+        });
+    });
+
+    /**
      * Serves the web readiness probe for local smoke checks.
      */
     application.get('/ready', (req, res) => {

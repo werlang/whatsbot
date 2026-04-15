@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import test from "node:test";
 import { createApp } from "../app.js";
+import { parseWhatsBotCommand } from "../services/whatsapp-command.js";
 import { WhatsAppClientManager } from "../services/whatsapp-client-manager.js";
 
 /**
@@ -24,8 +25,9 @@ async function stopTestServer(server) {
 
 test("GET /whatsapp/session returns the stable session envelope", async () => {
     const whatsappClient = {
-        getSessionState() {
+        async getSessionState() {
             return {
+                sessionId: "main",
                 clientId: "main",
                 status: "qr",
                 ready: false,
@@ -44,6 +46,17 @@ test("GET /whatsapp/session returns the stable session envelope", async () => {
                 disconnectReason: null,
             };
         },
+        getDefaultSessionId() {
+            return "main";
+        },
+        getKnownSessionState() {
+            return {
+                status: "qr",
+            };
+        },
+        getActiveSessionCount() {
+            return 1;
+        },
     };
     const server = await startTestServer({ whatsappClient });
     const { port } = server.address();
@@ -54,6 +67,7 @@ test("GET /whatsapp/session returns the stable session envelope", async () => {
 
         assert.equal(response.status, 200);
         assert.equal(payload.error, false);
+        assert.equal(payload.data.session.sessionId, "main");
         assert.equal(payload.data.session.status, "qr");
         assert.equal(payload.data.session.hasQrCode, true);
         assert.match(payload.data.session.qrCodeDataUrl, /^data:image\/png;base64,/);
@@ -257,5 +271,180 @@ test("WhatsAppClientManager throws a friendly error when no WhatsApp account is 
     await assert.rejects(
         () => manager.resolveWhatsAppChatId("5551999999999"),
         /could not resolve a registered account/i,
+    );
+});
+
+test("POST /whatsapp/sessions creates a new session envelope", async () => {
+    const whatsappClient = {
+        async createSession() {
+            return {
+                sessionId: "alpha",
+                clientId: "alpha",
+                status: "initializing",
+                ready: false,
+                authenticated: false,
+                hasQrCode: false,
+                qrCodeDataUrl: null,
+                qrCodeUpdatedAt: null,
+                connectionState: null,
+                loading: {
+                    percent: 0,
+                    message: null,
+                },
+                clientInfo: null,
+                lastError: null,
+                lastEventAt: null,
+                disconnectReason: null,
+            };
+        },
+        getDefaultSessionId() {
+            return "main";
+        },
+        getKnownSessionState() {
+            return { status: "idle" };
+        },
+        getActiveSessionCount() {
+            return 1;
+        },
+        async getSessionState() {
+            return {
+                sessionId: "main",
+                clientId: "main",
+                status: "idle",
+                ready: false,
+                authenticated: false,
+                hasQrCode: false,
+                qrCodeDataUrl: null,
+                qrCodeUpdatedAt: null,
+                connectionState: null,
+                loading: {
+                    percent: 0,
+                    message: null,
+                },
+                clientInfo: null,
+                lastError: null,
+                lastEventAt: null,
+                disconnectReason: null,
+            };
+        },
+    };
+    const server = await startTestServer({ whatsappClient });
+    const { port } = server.address();
+
+    try {
+        const response = await fetch(`http://127.0.0.1:${port}/whatsapp/sessions`, {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+            },
+            body: JSON.stringify({}),
+        });
+        const payload = await response.json();
+
+        assert.equal(response.status, 201);
+        assert.equal(payload.error, false);
+        assert.equal(payload.data.session.sessionId, "alpha");
+        assert.equal(payload.message, "WhatsApp session created.");
+    } finally {
+        await stopTestServer(server);
+    }
+});
+
+test("WhatsAppClientManager handles a self-command message and replies with confirmation", async () => {
+    const replies = [];
+    const commands = [];
+    const manager = new WhatsAppClientManager({
+        clientId: "alpha",
+        authPath: "/tmp/whatsapp-auth",
+        executablePath: "/usr/bin/chromium-browser",
+        puppeteerArgs: [],
+    }, {
+        onSelfCommand: async command => {
+            commands.push(command);
+            return {
+                scheduledMessage: {
+                    phoneNumber: "5551997771055",
+                    scheduledFor: "2026-04-15T19:20:30.000Z",
+                },
+                reply: "Scheduled 5551997771055 for 2026-04-15T19:20:30.000Z.",
+            };
+        },
+    });
+
+    manager.client = {
+        info: {
+            wid: {
+                _serialized: "5551999999999@c.us",
+                user: "5551999999999",
+            },
+        },
+    };
+
+    await manager.handleCreatedMessage({
+        fromMe: true,
+        body: "@whatsbot 5551997771055 2026-04-15-19-20-30 teste message",
+        to: "5551999999999@c.us",
+        id: {
+            _serialized: "wamid-self",
+        },
+        async reply(message) {
+            replies.push(message);
+        },
+    });
+
+    assert.equal(commands.length, 1);
+    assert.equal(commands[0].sessionId, "alpha");
+    assert.equal(commands[0].body, "@whatsbot 5551997771055 2026-04-15-19-20-30 teste message");
+    assert.deepEqual(replies, ["Scheduled 5551997771055 for 2026-04-15T19:20:30.000Z."]);
+});
+
+test("WhatsAppClientManager accepts self commands resolved through _getChatId", async () => {
+    const commands = [];
+    const manager = new WhatsAppClientManager({
+        clientId: "alpha",
+        authPath: "/tmp/whatsapp-auth",
+        executablePath: "/usr/bin/chromium-browser",
+        puppeteerArgs: [],
+    }, {
+        onSelfCommand: async command => {
+            commands.push(command);
+            return {
+                scheduledMessage: {
+                    phoneNumber: "5551997771055",
+                    scheduledFor: "2026-04-15T19:20:30.000Z",
+                },
+                reply: "ok",
+            };
+        },
+    });
+
+    manager.client = {
+        info: {
+            wid: {
+                _serialized: "5551999999999@c.us",
+                user: "5551999999999",
+            },
+        },
+    };
+
+    await manager.handleCreatedMessage({
+        fromMe: true,
+        body: "@whatsbot 5551997771055 2026-04-15-19-20-30 teste message",
+        from: "status@broadcast",
+        to: null,
+        _getChatId() {
+            return "5551999999999@c.us";
+        },
+        async reply() {},
+    });
+
+    assert.equal(commands.length, 1);
+    assert.equal(commands[0].sessionId, "alpha");
+});
+
+test("parseWhatsBotCommand rejects invalid local datetimes", () => {
+    assert.throws(
+        () => parseWhatsBotCommand("@whatsbot 5551997771055 2026-02-31-19-20-30 teste message"),
+        /valid local date and time/i,
     );
 });
