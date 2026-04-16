@@ -32,6 +32,7 @@ class ScheduledMessage extends Model {
     static STATUS_FAILED = "failed";
     static DEFAULT_RECLAIM_AFTER_MS = 10 * 60 * 1000;
     static ALLOWED_STATUSES = ["pending", "processing", "sent", "failed"];
+    static EDITABLE_STATUSES = ["pending", "failed"];
 
     /**
      * Creates the scheduled message entity with project defaults.
@@ -215,6 +216,32 @@ class ScheduledMessage extends Model {
     }
 
     /**
+     * Serializes user-editable fields while resetting delivery state back to pending.
+     */
+    static serializeEditablePayload(payload = {}) {
+        const messageTarget = normalizeMessageTarget(payload);
+
+        return Object.fromEntries(
+            Object.entries({
+                target_type: messageTarget.targetType,
+                target_value: messageTarget.targetValue,
+                phone_number: messageTarget.phoneNumber,
+                message: String(payload.message ?? "").trim(),
+                scheduled_for: payload.scheduledFor ? this.driver.toDateTime(payload.scheduledFor) : undefined,
+                status: this.STATUS_PENDING,
+                claim_token: null,
+                claimed_at: null,
+                last_attempt_at: null,
+                sent_at: null,
+                whatsapp_chat_id: null,
+                whatsapp_message_id: null,
+                error_message: null,
+                updated_at: this.driver.toDateTime(payload.updatedAt || new Date().toISOString()),
+            }).filter(([, value]) => value !== undefined),
+        );
+    }
+
+    /**
      * Creates and returns one persisted scheduled message.
      */
     static async create(payload) {
@@ -234,6 +261,56 @@ class ScheduledMessage extends Model {
         }
 
         return this.get(id);
+    }
+
+    /**
+     * Returns true when one scheduled message can still be edited or removed.
+     */
+    static isEditable(scheduledMessage = {}) {
+        return this.EDITABLE_STATUSES.includes(this.normalizeStatus(scheduledMessage.status));
+    }
+
+    /**
+     * Lists the scheduled messages that belong to one session.
+     */
+    static async listBySessionId(sessionId, { limit = 100 } = {}) {
+        const normalizedSessionId = String(sessionId || "main").trim() || "main";
+        const boundedLimit = Math.max(1, Number.parseInt(limit, 10) || 100);
+
+        return this.find({
+            filter: {
+                session_id: normalizedSessionId,
+            },
+            view: this.view,
+            opt: {
+                order: { scheduled_for: 1 },
+                limit: boundedLimit,
+            },
+        });
+    }
+
+    /**
+     * Updates one editable scheduled message and returns the persisted snapshot.
+     */
+    static async updateEditable(id, payload = {}) {
+        if (!id) {
+            return null;
+        }
+
+        await this.driver.update(this.table, this.serializeEditablePayload(payload), id);
+        return this.get(id);
+    }
+
+    /**
+     * Deletes one scheduled message by id.
+     */
+    static async deleteById(id) {
+        if (!id) {
+            return false;
+        }
+
+        await this.delete(id, { limit: 1 });
+        return true;
     }
 
     /**

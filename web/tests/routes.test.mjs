@@ -47,14 +47,19 @@ test("GET /session/main renders the scheduler UI shell", async () => {
         const body = await response.text();
 
         assert.equal(response.status, 200);
-        assert.match(body, /Schedule a message\./);
+        assert.match(body, /Plan a message\./);
         assert.match(body, /id="schedule-form"/);
         assert.match(body, /id="recipient-picker"/);
         assert.match(body, /id="phone-number"/);
         assert.match(body, /id="message"/);
         assert.match(body, /id="scheduled-for"/);
+        assert.match(body, /data-role="schedule-form-kicker"/);
+        assert.match(body, /data-role="schedule-cancel-edit"/);
         assert.match(body, /Connection/);
         assert.match(body, /id="session-status"/);
+        assert.match(body, /Scheduled messages/);
+        assert.match(body, /data-role="schedule-list"/);
+        assert.match(body, /data-role="schedule-refresh"/);
         assert.match(body, /data-role="session-progress-body"/);
         assert.match(body, /data-role="session-check-now"/);
         assert.match(body, /Schedule/);

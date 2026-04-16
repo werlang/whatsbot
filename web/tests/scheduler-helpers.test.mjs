@@ -12,6 +12,14 @@ import {
     readRecipientDirectory,
     resolveScheduledMessageTarget,
 } from "../public/js/helpers/recipient.js";
+import {
+    buildScheduledMessageDraft,
+    buildScheduledMessageViewModel,
+    createScheduleFormMode,
+    removeScheduledMessageFromCollection,
+    sortScheduledMessages,
+    upsertScheduledMessageInCollection,
+} from "../public/js/helpers/scheduled-message.js";
 import { describeSession, formatSessionTimestamp } from "../public/js/helpers/session.js";
 
 test("convertDateTimeLocalToOffsetIso returns a timezone-aware ISO timestamp", () => {
@@ -137,4 +145,94 @@ test("recipient helper encodes and resolves picker selections before manual phon
     }), {
         phoneNumber: "+55 (51) 99999-9999",
     });
+});
+
+test("scheduled-message helper builds one form draft from an editable schedule", () => {
+    const draft = buildScheduledMessageDraft({
+        id: "msg-1",
+        targetType: "contact",
+        targetValue: "5551999999999",
+        phoneNumber: "5551999999999",
+        message: "hello world",
+        scheduledFor: "2026-04-15T18:30:00.000Z",
+    });
+
+    assert.equal(draft.id, "msg-1");
+    assert.equal(draft.recipientValue, buildRecipientChoiceValue({
+        targetType: "contact",
+        targetValue: "5551999999999",
+    }));
+    assert.equal(draft.phoneNumber, "5551999999999");
+    assert.equal(draft.message, "hello world");
+    assert.match(draft.scheduledFor, /^2026-04-15T/);
+});
+
+test("scheduled-message helper derives render details and action availability", () => {
+    const recipientLabelByValue = new Map([[
+        buildRecipientChoiceValue({
+            targetType: "group",
+            targetValue: "120363043210123456@g.us",
+        }),
+        "Launch Team · Group",
+    ]]);
+    const viewModel = buildScheduledMessageViewModel({
+        id: "msg-2",
+        targetType: "group",
+        targetValue: "120363043210123456@g.us",
+        phoneNumber: null,
+        message: "hello everyone",
+        scheduledFor: "2026-04-15T18:30:00.000Z",
+        status: "failed",
+    }, recipientLabelByValue);
+
+    assert.equal(viewModel.recipientLabel, "Launch Team · Group");
+    assert.equal(viewModel.statusLabel, "Failed");
+    assert.equal(viewModel.statusTone, "danger");
+    assert.equal(viewModel.canEdit, true);
+    assert.equal(viewModel.canDelete, true);
+    assert.match(viewModel.scheduledForLabel, /18:30/);
+});
+
+test("scheduled-message helper switches form labels for edit mode", () => {
+    assert.deepEqual(createScheduleFormMode(), {
+        kicker: "New",
+        title: "Message",
+        submitLabel: "Schedule",
+        cancelLabel: "Cancel edit",
+        isEditing: false,
+    });
+    assert.deepEqual(createScheduleFormMode({ id: "msg-3" }), {
+        kicker: "Editing",
+        title: "Message",
+        submitLabel: "Save changes",
+        cancelLabel: "Cancel edit",
+        isEditing: true,
+    });
+});
+
+test("scheduled-message helper upserts, sorts, and removes collection entries", () => {
+    const first = {
+        id: "msg-1",
+        scheduledFor: "2026-04-15T18:30:00.000Z",
+    };
+    const second = {
+        id: "msg-2",
+        scheduledFor: "2026-04-15T17:30:00.000Z",
+    };
+    const third = {
+        id: "msg-3",
+        scheduledFor: "2026-04-15T19:30:00.000Z",
+    };
+
+    const ordered = sortScheduledMessages([first, third, second]);
+    assert.deepEqual(ordered.map(item => item.id), ["msg-2", "msg-1", "msg-3"]);
+
+    const updated = upsertScheduledMessageInCollection(ordered, {
+        id: "msg-1",
+        scheduledFor: "2026-04-15T20:30:00.000Z",
+    });
+    assert.deepEqual(updated.map(item => item.id), ["msg-2", "msg-3", "msg-1"]);
+
+    const remaining = removeScheduledMessageFromCollection(updated, "msg-3");
+    assert.deepEqual(remaining.map(item => item.id), ["msg-2", "msg-1"]);
 });

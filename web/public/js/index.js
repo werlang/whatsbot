@@ -13,6 +13,14 @@ import {
     readRecipientDirectory,
     resolveScheduledMessageTarget,
 } from "./helpers/recipient.js";
+import {
+    buildScheduledMessageDraft,
+    buildScheduledMessageViewModel,
+    createScheduleFormMode,
+    removeScheduledMessageFromCollection,
+    sortScheduledMessages,
+    upsertScheduledMessageInCollection,
+} from "./helpers/scheduled-message.js";
 import { describeSession } from "./helpers/session.js";
 import {
     buildSessionAccessHeaders,
@@ -40,6 +48,14 @@ function createElements() {
         scheduledFor: document.querySelector("#scheduled-for"),
         submitButton: document.querySelector("#schedule-submit"),
         formFeedback: document.querySelector("#form-feedback"),
+        scheduleList: document.querySelector("[data-role=schedule-list]"),
+        scheduleListEmpty: document.querySelector("[data-role=schedule-list-empty]"),
+        scheduleListFeedback: document.querySelector("[data-role=schedule-list-feedback]"),
+        scheduleCount: document.querySelector("[data-role=schedule-count]"),
+        scheduleRefresh: document.querySelector("[data-role=schedule-refresh]"),
+        scheduleFormKicker: document.querySelector("[data-role=schedule-form-kicker]"),
+        scheduleFormTitle: document.querySelector("[data-role=schedule-form-title]"),
+        scheduleCancelEdit: document.querySelector("[data-role=schedule-cancel-edit]"),
         sessionStatus: document.querySelector("#session-status"),
         sessionConnection: document.querySelector("#session-connection"),
         sessionNote: document.querySelector("#session-note"),
@@ -70,6 +86,9 @@ function createElements() {
             lastRefreshAt: 0,
             pairingDetected: false,
             previousDescription: null,
+            scheduledMessages: [],
+            editingScheduledMessageId: "",
+            isRefreshingScheduledMessages: false,
         },
     };
 }
@@ -180,6 +199,12 @@ function renderRecipientAutocomplete(elements, entries, { sessionReady = false, 
     if (previousLabel && elements.recipientValueByLabel.has(previousLabel)) {
         elements.recipientEntry.value = previousLabel;
         elements.recipientPicker.value = elements.recipientValueByLabel.get(previousLabel);
+        return;
+    }
+
+    if (previousValue) {
+        elements.recipientEntry.value = previousLabel;
+        elements.recipientPicker.value = previousValue;
         return;
     }
 
@@ -295,6 +320,190 @@ function renderFormEnhancements(elements) {
 }
 
 /**
+ * Returns the scheduled message currently being edited, if any.
+ */
+function readEditingScheduledMessage(elements) {
+    const editingScheduledMessageId = String(elements.uiState.editingScheduledMessageId || "").trim();
+
+    if (!editingScheduledMessageId) {
+        return null;
+    }
+
+    return elements.uiState.scheduledMessages.find(scheduledMessage => scheduledMessage.id === editingScheduledMessageId) || null;
+}
+
+/**
+ * Renders the scheduler form header and actions for create or edit mode.
+ */
+function renderScheduleFormMode(elements) {
+    const formMode = createScheduleFormMode(readEditingScheduledMessage(elements));
+
+    if (elements.scheduleFormKicker) {
+        elements.scheduleFormKicker.textContent = formMode.kicker;
+    }
+
+    if (elements.scheduleFormTitle) {
+        elements.scheduleFormTitle.textContent = formMode.title;
+    }
+
+    if (elements.submitButton) {
+        elements.submitButton.textContent = formMode.submitLabel;
+    }
+
+    if (elements.scheduleCancelEdit) {
+        elements.scheduleCancelEdit.hidden = !formMode.isEditing;
+        elements.scheduleCancelEdit.textContent = formMode.cancelLabel;
+    }
+}
+
+/**
+ * Resets the form after a create flow or when leaving edit mode.
+ */
+function resetScheduleForm(elements, { preserveRecipient = false } = {}) {
+    elements.uiState.editingScheduledMessageId = "";
+
+    if (!preserveRecipient) {
+        if (elements.recipientEntry) {
+            elements.recipientEntry.value = "";
+        }
+        if (elements.recipientPicker) {
+            elements.recipientPicker.value = "";
+        }
+        if (elements.phoneNumber) {
+            elements.phoneNumber.value = "";
+        }
+    }
+
+    if (elements.message) {
+        elements.message.value = "";
+    }
+
+    if (elements.scheduledFor) {
+        elements.scheduledFor.value = createDefaultScheduledDateTime();
+    }
+
+    setActivePreset(elements, "");
+    renderScheduleFormMode(elements);
+    renderFormEnhancements(elements);
+}
+
+/**
+ * Loads one scheduled message into the form for editing.
+ */
+function startScheduledMessageEdit(elements, scheduledMessage) {
+    if (!scheduledMessage?.id) {
+        return;
+    }
+
+    const draft = buildScheduledMessageDraft(scheduledMessage);
+    const viewModel = buildScheduledMessageViewModel(scheduledMessage, elements.recipientLabelByValue);
+
+    elements.uiState.editingScheduledMessageId = draft.id;
+
+    if (elements.recipientPicker) {
+        elements.recipientPicker.value = draft.recipientValue;
+    }
+
+    if (elements.recipientEntry) {
+        elements.recipientEntry.value = elements.recipientLabelByValue.get(draft.recipientValue) || viewModel.recipientLabel;
+    }
+
+    if (elements.phoneNumber) {
+        elements.phoneNumber.value = draft.phoneNumber;
+    }
+
+    if (elements.message) {
+        elements.message.value = draft.message;
+    }
+
+    if (elements.scheduledFor) {
+        elements.scheduledFor.value = draft.scheduledFor;
+    }
+
+    renderScheduleFormMode(elements);
+    renderFormEnhancements(elements);
+    elements.form?.scrollIntoView({ behavior: "smooth", block: "start" });
+    elements.message?.focus();
+}
+
+/**
+ * Renders the schedule queue panel.
+ */
+function renderScheduledMessages(elements) {
+    if (!elements.scheduleList) {
+        return;
+    }
+
+    const scheduledMessages = sortScheduledMessages(elements.uiState.scheduledMessages);
+    elements.uiState.scheduledMessages = scheduledMessages;
+
+    if (elements.scheduleCount) {
+        elements.scheduleCount.textContent = String(scheduledMessages.length);
+    }
+
+    elements.scheduleList.replaceChildren();
+
+    if (elements.scheduleListEmpty) {
+        elements.scheduleListEmpty.hidden = scheduledMessages.length > 0;
+    }
+
+    for (const scheduledMessage of scheduledMessages) {
+        const viewModel = buildScheduledMessageViewModel(scheduledMessage, elements.recipientLabelByValue);
+        const row = document.createElement("article");
+        row.className = "schedule-list__row";
+        row.dataset.scheduledMessageId = viewModel.id;
+
+        const messageCell = document.createElement("div");
+        messageCell.className = "schedule-list__primary";
+        const recipient = document.createElement("p");
+        recipient.className = "schedule-list__label";
+        recipient.textContent = viewModel.recipientLabel;
+        const message = document.createElement("p");
+        message.className = "schedule-list__message";
+        message.textContent = viewModel.messagePreview;
+        messageCell.append(recipient, message);
+
+        const timeCell = document.createElement("p");
+        timeCell.className = "schedule-list__time";
+        timeCell.textContent = viewModel.scheduledForLabel || "Time unavailable";
+
+        const statusCell = document.createElement("div");
+        statusCell.className = "schedule-list__status";
+        const statusPill = document.createElement("span");
+        statusPill.className = "status-pill";
+        statusPill.dataset.tone = viewModel.statusTone;
+        statusPill.textContent = viewModel.statusLabel;
+        statusCell.append(statusPill);
+
+        const actionsCell = document.createElement("div");
+        actionsCell.className = "schedule-list__actions";
+        if (viewModel.canEdit) {
+            const editButton = document.createElement("button");
+            editButton.className = "button button--ghost schedule-action";
+            editButton.type = "button";
+            editButton.dataset.action = "edit";
+            editButton.dataset.scheduledMessageId = viewModel.id;
+            editButton.textContent = "Edit";
+            actionsCell.append(editButton);
+        }
+        if (viewModel.canDelete) {
+            const deleteButton = document.createElement("button");
+            deleteButton.className = "button button--ghost schedule-action";
+            deleteButton.type = "button";
+            deleteButton.dataset.action = "delete";
+            deleteButton.dataset.scheduledMessageId = viewModel.id;
+            deleteButton.textContent = "Delete";
+            actionsCell.append(deleteButton);
+        }
+
+        row.append(messageCell, timeCell, statusCell, actionsCell);
+        elements.scheduleList.append(row);
+    }
+
+    renderScheduleFormMode(elements);
+}
+
+/**
  * Computes one datetime-local value from a quick preset id.
  */
 function buildPresetDateTimeValue(preset) {
@@ -366,6 +575,34 @@ function bindInteractiveFormHelpers(elements) {
             renderFormEnhancements(elements);
         });
     }
+
+    elements.scheduleCancelEdit?.addEventListener("click", function() {
+        resetScheduleForm(elements, { preserveRecipient: false });
+        setFeedback(elements.formFeedback, "info", "Edit canceled.");
+    });
+
+    elements.scheduleList?.addEventListener("click", function(event) {
+        const actionButton = event.target instanceof HTMLElement
+            ? event.target.closest("[data-action][data-scheduled-message-id]")
+            : null;
+
+        if (!actionButton) {
+            return;
+        }
+
+        const scheduledMessageId = actionButton.dataset.scheduledMessageId || "";
+        const scheduledMessage = elements.uiState.scheduledMessages
+            .find(entry => entry.id === scheduledMessageId) || null;
+
+        if (!scheduledMessage) {
+            return;
+        }
+
+        if (actionButton.dataset.action === "edit") {
+            startScheduledMessageEdit(elements, scheduledMessage);
+            setFeedback(elements.formFeedback, "info", "Editing scheduled message.");
+        }
+    });
 }
 
 /**
@@ -395,6 +632,7 @@ function hydrateFormDefaults(elements, sessionId) {
     }
 
     renderFormEnhancements(elements);
+    renderScheduleFormMode(elements);
 }
 
 /**
@@ -577,6 +815,110 @@ function renderSessionProgress(elements, description = {}) {
 }
 
 /**
+ * Loads the latest schedules for the active session.
+ */
+async function refreshScheduledMessages(elements, sessionAccess, { announce = false } = {}) {
+    if (elements.uiState.isRefreshingScheduledMessages) {
+        return;
+    }
+
+    elements.uiState.isRefreshingScheduledMessages = true;
+
+    if (announce) {
+        setFeedback(elements.scheduleListFeedback, "info", "Refreshing scheduled messages...");
+    }
+
+    if (elements.scheduleRefresh) {
+        elements.scheduleRefresh.disabled = true;
+    }
+
+    try {
+        const response = await requestApi(`/messages?sessionId=${encodeURIComponent(sessionAccess.sessionId)}`, {
+            headers: buildSessionAccessHeaders(sessionAccess.accessToken),
+        });
+
+        if (response.status === 401) {
+            clearStoredSessionAccess();
+            globalThis.location.replace("/login");
+            return;
+        }
+
+        if (!response.ok) {
+            setFeedback(elements.scheduleListFeedback, "danger", readResponseMessage(response, "Could not load scheduled messages."));
+            return;
+        }
+
+        elements.uiState.scheduledMessages = sortScheduledMessages(response.data?.scheduledMessages || []);
+        renderScheduledMessages(elements);
+        setFeedback(elements.scheduleListFeedback, "", "");
+    } catch (error) {
+        setFeedback(
+            elements.scheduleListFeedback,
+            "danger",
+            error instanceof Error && error.message
+                ? error.message
+                : "Could not load scheduled messages.",
+        );
+    } finally {
+        elements.uiState.isRefreshingScheduledMessages = false;
+        if (elements.scheduleRefresh) {
+            elements.scheduleRefresh.disabled = false;
+        }
+    }
+}
+
+/**
+ * Deletes one scheduled message after confirmation.
+ */
+async function deleteScheduledMessage(elements, sessionAccess, scheduledMessage) {
+    if (!scheduledMessage?.id) {
+        return;
+    }
+
+    const viewModel = buildScheduledMessageViewModel(scheduledMessage, elements.recipientLabelByValue);
+    const confirmed = globalThis.confirm(`Delete the message to ${viewModel.recipientLabel} planned for ${viewModel.scheduledForLabel}?`);
+
+    if (!confirmed) {
+        return;
+    }
+
+    setFeedback(elements.scheduleListFeedback, "info", "Deleting scheduled message...");
+
+    try {
+        const response = await requestApi(`/messages/${encodeURIComponent(scheduledMessage.id)}`, {
+            method: "DELETE",
+            headers: buildSessionAccessHeaders(sessionAccess.accessToken),
+        });
+
+        if (response.status === 401) {
+            clearStoredSessionAccess();
+            globalThis.location.replace("/login");
+            return;
+        }
+
+        if (!response.ok) {
+            setFeedback(elements.scheduleListFeedback, "danger", readResponseMessage(response, "Could not delete the scheduled message."));
+            return;
+        }
+
+        elements.uiState.scheduledMessages = removeScheduledMessageFromCollection(elements.uiState.scheduledMessages, scheduledMessage.id);
+        if (elements.uiState.editingScheduledMessageId === scheduledMessage.id) {
+            resetScheduleForm(elements, { preserveRecipient: false });
+        }
+        renderScheduledMessages(elements);
+        setFeedback(elements.scheduleListFeedback, "success", "Scheduled message deleted.");
+    } catch (error) {
+        setFeedback(
+            elements.scheduleListFeedback,
+            "danger",
+            error instanceof Error && error.message
+                ? error.message
+                : "Could not delete the scheduled message.",
+        );
+    }
+}
+
+/**
  * Plans the next automatic refresh of the workspace session state.
  */
 function scheduleSessionRefresh(elements, sessionAccess, description = {}) {
@@ -650,6 +992,7 @@ async function refreshSessionState(elements, sessionAccess, { force = false } = 
         renderSessionState(elements, description);
         renderSessionProgress(elements, description);
         renderRecipientDirectory(elements, response.data.session);
+        renderScheduledMessages(elements);
         renderFormEnhancements(elements);
 
         uiState.previousDescription = description;
@@ -669,7 +1012,10 @@ async function submitSchedule(event, elements, sessionAccess) {
         return;
     }
 
-    setFeedback(elements.formFeedback, "info", "Scheduling message...");
+    const editingScheduledMessageId = String(elements.uiState.editingScheduledMessageId || "").trim();
+    const isEditing = Boolean(editingScheduledMessageId);
+
+    setFeedback(elements.formFeedback, "info", isEditing ? "Saving changes..." : "Scheduling message...");
     elements.submitButton.disabled = true;
 
     try {
@@ -677,8 +1023,10 @@ async function submitSchedule(event, elements, sessionAccess) {
             selectedRecipientValue: elements.recipientPicker?.value,
             phoneNumber: elements.phoneNumber?.value,
         });
-        const response = await requestApi("/messages", {
-            method: "POST",
+        const response = await requestApi(isEditing
+            ? `/messages/${encodeURIComponent(editingScheduledMessageId)}`
+            : "/messages", {
+            method: isEditing ? "PUT" : "POST",
             headers: buildSessionAccessHeaders(sessionAccess.accessToken),
             body: {
                 sessionId: sessionAccess.sessionId,
@@ -703,24 +1051,34 @@ async function submitSchedule(event, elements, sessionAccess) {
             sessionId: sessionAccess.sessionId,
             targetPayload,
             scheduledMessage: response.data?.scheduledMessage || null,
+            isEditing,
         });
 
         const scheduledMessage = response.data && response.data.scheduledMessage ? response.data.scheduledMessage : null;
-        let successMessage = "Message scheduled successfully.";
+        let successMessage = isEditing ? "Scheduled message updated." : "Message scheduled successfully.";
         if (scheduledMessage && scheduledMessage.scheduledFor) {
             successMessage += " Planned for " + formatIsoForDisplay(scheduledMessage.scheduledFor) + ".";
         }
 
         setFeedback(elements.formFeedback, "success", successMessage);
 
-        if (elements.message) {
-            elements.message.value = "";
+        if (scheduledMessage) {
+            elements.uiState.scheduledMessages = upsertScheduledMessageInCollection(elements.uiState.scheduledMessages, scheduledMessage);
+            renderScheduledMessages(elements);
         }
-        if (elements.scheduledFor) {
-            elements.scheduledFor.value = createDefaultScheduledDateTime();
+
+        if (isEditing) {
+            resetScheduleForm(elements, { preserveRecipient: false });
+        } else {
+            if (elements.message) {
+                elements.message.value = "";
+            }
+            if (elements.scheduledFor) {
+                elements.scheduledFor.value = createDefaultScheduledDateTime();
+            }
+            setActivePreset(elements, "");
+            renderFormEnhancements(elements);
         }
-        setActivePreset(elements, "");
-        renderFormEnhancements(elements);
     } catch (error) {
         setFeedback(
             elements.formFeedback,
@@ -760,10 +1118,32 @@ function initSchedulerPage() {
     bindInteractiveFormHelpers(elements);
     renderSessionProgress(elements);
     void refreshSessionState(elements, activeSessionAccess);
+    void refreshScheduledMessages(elements, activeSessionAccess);
 
     elements.sessionCheckNow?.addEventListener("click", function() {
         setFeedback(elements.formFeedback, "info", "Checking session status now...");
         void refreshSessionState(elements, activeSessionAccess, { force: true });
+    });
+
+    elements.scheduleRefresh?.addEventListener("click", function() {
+        void refreshScheduledMessages(elements, activeSessionAccess, { announce: true });
+    });
+
+    elements.scheduleList?.addEventListener("click", function(event) {
+        const actionButton = event.target instanceof HTMLElement
+            ? event.target.closest("[data-action=delete][data-scheduled-message-id]")
+            : null;
+
+        if (!actionButton) {
+            return;
+        }
+
+        const scheduledMessage = elements.uiState.scheduledMessages
+            .find(entry => entry.id === actionButton.dataset.scheduledMessageId) || null;
+
+        if (scheduledMessage) {
+            void deleteScheduledMessage(elements, activeSessionAccess, scheduledMessage);
+        }
     });
 
     elements.form.addEventListener("submit", function(event) {

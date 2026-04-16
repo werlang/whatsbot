@@ -132,3 +132,151 @@ test("ScheduledMessage.claimDue reclaims stale processing rows without touching 
         ScheduledMessage.driver = originalDriver;
     }
 });
+
+test("ScheduledMessage.updateEditable rewrites mutable fields and resets delivery state", async () => {
+    const originalDriver = ScheduledMessage.driver;
+    const updateCalls = [];
+
+    ScheduledMessage.driver = {
+        toDateTime,
+        async update(table, data, clause) {
+            updateCalls.push({ table, data, clause });
+            return { affectedRows: 1 };
+        },
+        async find() {
+            return [{
+                id: "msg-2",
+                session_id: "main",
+                target_type: "group",
+                target_value: "120363043210123456@g.us",
+                phone_number: null,
+                message: "updated",
+                scheduled_for: "2026-04-16 12:00:00",
+                status: "pending",
+                claim_token: null,
+                claimed_at: null,
+                last_attempt_at: null,
+                sent_at: null,
+                whatsapp_chat_id: null,
+                whatsapp_message_id: null,
+                error_message: null,
+                created_at: "2026-04-15 11:25:00",
+                updated_at: "2026-04-15 12:00:00",
+            }];
+        },
+    };
+
+    try {
+        const scheduledMessage = await ScheduledMessage.updateEditable("msg-2", {
+            targetType: "group",
+            targetValue: "120363043210123456@g.us",
+            message: " updated ",
+            scheduledFor: "2026-04-16T12:00:00.000Z",
+            updatedAt: "2026-04-15T12:00:00.000Z",
+        });
+
+        assert.equal(updateCalls.length, 1);
+        assert.deepEqual(updateCalls[0], {
+            table: ScheduledMessage.table,
+            data: {
+                target_type: "group",
+                target_value: "120363043210123456@g.us",
+                phone_number: null,
+                message: "updated",
+                scheduled_for: "2026-04-16 12:00:00",
+                status: ScheduledMessage.STATUS_PENDING,
+                claim_token: null,
+                claimed_at: null,
+                last_attempt_at: null,
+                sent_at: null,
+                whatsapp_chat_id: null,
+                whatsapp_message_id: null,
+                error_message: null,
+                updated_at: "2026-04-15 12:00:00",
+            },
+            clause: "msg-2",
+        });
+        assert.equal(scheduledMessage.status, "pending");
+        assert.equal(scheduledMessage.errorMessage, null);
+        assert.equal(scheduledMessage.targetType, "group");
+    } finally {
+        ScheduledMessage.driver = originalDriver;
+    }
+});
+
+test("ScheduledMessage.listBySessionId filters by session and orders by schedule time", async () => {
+    const originalDriver = ScheduledMessage.driver;
+    const findCalls = [];
+
+    ScheduledMessage.driver = {
+        async find(table, options) {
+            findCalls.push({ table, options });
+            return [{
+                id: "msg-3",
+                session_id: "alpha",
+                target_type: "contact",
+                target_value: "5551999999999",
+                phone_number: "5551999999999",
+                message: "hello world",
+                scheduled_for: "2026-04-16 09:00:00",
+                status: "pending",
+                claim_token: null,
+                claimed_at: null,
+                last_attempt_at: null,
+                sent_at: null,
+                whatsapp_chat_id: null,
+                whatsapp_message_id: null,
+                error_message: null,
+                created_at: "2026-04-15 11:25:00",
+                updated_at: "2026-04-15 12:00:00",
+            }];
+        },
+    };
+
+    try {
+        const scheduledMessages = await ScheduledMessage.listBySessionId("alpha", { limit: 25 });
+
+        assert.equal(scheduledMessages.length, 1);
+        assert.equal(scheduledMessages[0].sessionId, "alpha");
+        assert.deepEqual(findCalls[0], {
+            table: ScheduledMessage.table,
+            options: {
+                filter: {
+                    session_id: "alpha",
+                },
+                view: ScheduledMessage.view,
+                opt: {
+                    order: { scheduled_for: 1 },
+                    limit: 25,
+                },
+            },
+        });
+    } finally {
+        ScheduledMessage.driver = originalDriver;
+    }
+});
+
+test("ScheduledMessage.deleteById deletes one row with a safety limit", async () => {
+    const originalDriver = ScheduledMessage.driver;
+    const deleteCalls = [];
+
+    ScheduledMessage.driver = {
+        async delete(table, clause, options) {
+            deleteCalls.push({ table, clause, options });
+            return { affectedRows: 1 };
+        },
+    };
+
+    try {
+        const deleted = await ScheduledMessage.deleteById("msg-4");
+
+        assert.equal(deleted, true);
+        assert.deepEqual(deleteCalls, [{
+            table: ScheduledMessage.table,
+            clause: "msg-4",
+            options: { limit: 1 },
+        }]);
+    } finally {
+        ScheduledMessage.driver = originalDriver;
+    }
+});

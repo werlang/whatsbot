@@ -41,8 +41,12 @@
             <section class="panel panel--form" aria-labelledby="scheduler-title">
                 <div class="panel__header">
                     <div>
-                        <span class="panel__kicker">New</span>
-                        <h2 id="scheduler-title">Message</h2>
+                        <span class="panel__kicker" data-role="schedule-form-kicker">New</span>
+                        <h2 id="scheduler-title" data-role="schedule-form-title">Message</h2>
+                    </div>
+
+                    <div class="panel__actions">
+                        <button class="button button--ghost" data-role="schedule-cancel-edit" type="button" hidden>Cancel edit</button>
                     </div>
                 </div>
 
@@ -112,7 +116,9 @@
                         <p class="preview-card__text" data-role="schedule-preview">Fill the form.</p>
                     </section>
 
-                    <button class="button button--primary" id="schedule-submit" type="submit">Schedule</button>
+                    <div class="form__actions">
+                        <button class="button button--primary" id="schedule-submit" type="submit">Schedule</button>
+                    </div>
                 </form>
             </section>
 
@@ -156,6 +162,33 @@
                         <figcaption>Scan in WhatsApp.</figcaption>
                     </figure>
                 </aside>
+
+                <section class="panel panel--schedule-list" aria-labelledby="scheduled-messages-title">
+                    <div class="panel__header">
+                        <div>
+                            <span class="panel__kicker">Queue</span>
+                            <h2 id="scheduled-messages-title">Scheduled messages</h2>
+                        </div>
+
+                        <div class="panel__actions">
+                            <button class="button button--ghost" data-role="schedule-refresh" type="button">Refresh</button>
+                            <span class="panel__badge" data-role="schedule-count">0</span>
+                        </div>
+                    </div>
+
+                    <div class="feedback" id="schedule-list-feedback" data-role="schedule-list-feedback" hidden aria-live="polite"></div>
+
+                    <div class="schedule-list-shell" aria-label="Scheduled messages for this session">
+                        <div class="schedule-list__head" aria-hidden="true">
+                            <span>Message</span>
+                            <span>Time</span>
+                            <span>Status</span>
+                            <span>Actions</span>
+                        </div>
+                        <div class="schedule-list__body" data-role="schedule-list"></div>
+                        <p class="schedule-list__empty" data-role="schedule-list-empty">No scheduled messages yet.</p>
+                    </div>
+                </section>
             </div>
         </div>
 

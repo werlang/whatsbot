@@ -377,6 +377,14 @@ button {
     gap: 0.6rem;
 }
 
+.panel__actions,
+.form__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+}
+
 .panel__badge {
     align-self: start;
     padding: 0.5rem 0.75rem;
@@ -608,6 +616,119 @@ a:focus-visible {
     gap: 0.55rem;
     padding: 1rem 1.1rem;
     border-radius: var(--radius-xl);
+}
+
+.form__actions .button--primary {
+    flex: 1 1 220px;
+}
+
+.schedule-list-shell {
+    display: grid;
+    gap: 0.8rem;
+}
+
+.schedule-list__head,
+.schedule-list__row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(170px, 0.9fr) auto auto;
+    gap: 0.85rem;
+    align-items: center;
+}
+
+.schedule-list__head {
+    padding: 0 0.95rem;
+    color: var(--color-ink-muted);
+    font-size: 0.76rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.schedule-list__body {
+    display: grid;
+    gap: 0.8rem;
+}
+
+.schedule-list__row {
+    padding: 1rem 0.95rem;
+    border-radius: var(--radius-xl);
+    border: 1px solid rgba(170, 186, 212, 0.34);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.84) 0%, rgba(243, 248, 255, 0.96) 100%);
+    box-shadow: var(--shadow-card);
+}
+
+.schedule-list__primary {
+    display: grid;
+    gap: 0.3rem;
+}
+
+.schedule-list__label,
+.schedule-list__message,
+.schedule-list__time {
+    margin: 0;
+}
+
+.schedule-list__label {
+    font-weight: 700;
+    color: var(--color-ink);
+}
+
+.schedule-list__message,
+.schedule-list__time {
+    color: var(--color-ink-soft);
+}
+
+.schedule-list__message {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.schedule-list__status,
+.schedule-list__actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.55rem;
+}
+
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.42rem 0.72rem;
+    border-radius: 999px;
+    background: var(--color-accent-soft);
+    color: var(--color-accent-deep);
+    font-size: 0.84rem;
+    font-weight: 700;
+}
+
+.status-pill[data-tone="success"] {
+    background: var(--color-success-soft);
+    color: #0e6a43;
+}
+
+.status-pill[data-tone="warning"] {
+    background: var(--color-warning-soft);
+    color: #8b5306;
+}
+
+.status-pill[data-tone="danger"] {
+    background: var(--color-danger-soft);
+    color: #9f2b2b;
+}
+
+.schedule-action {
+    min-height: 2.5rem;
+    padding: 0.65rem 0.95rem;
+    font-size: 0.92rem;
+}
+
+.schedule-list__empty {
+    padding: 1rem 0.25rem 0;
+    color: var(--color-ink-muted);
 }
 
 .preview-card__text {
@@ -849,6 +970,12 @@ dialog.session-secret-modal {
         grid-template-columns: 1fr;
     }
 
+    .panel__actions,
+    .form__actions,
+    .schedule-list__actions {
+        width: 100%;
+    }
+
     .session-progress__actions .button,
     .button--wide,
     .button {
@@ -960,6 +1087,19 @@ dialog.session-secret-modal {
     .topbar__actions .button,
     .preset-row .chip {
         width: 100%;
+    }
+
+    .schedule-list__head {
+        display: none;
+    }
+
+    .schedule-list__row {
+        grid-template-columns: 1fr;
+    }
+
+    .schedule-list__status,
+    .schedule-list__actions {
+        justify-content: flex-start;
     }
 
     .hero,
