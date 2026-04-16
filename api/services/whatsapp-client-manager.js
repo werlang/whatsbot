@@ -3,6 +3,7 @@ import path from "node:path";
 import QRCode from "qrcode";
 import WhatsAppWeb from "whatsapp-web.js";
 import { appConfig } from '../config/app-config.js';
+import { HttpError } from "../helpers/error.js";
 import { CONTACT_TARGET_TYPE, GROUP_TARGET_TYPE, normalizeMessageTarget } from "../helpers/message-target.js";
 import { normalizePhoneNumber, toWhatsAppChatId } from "../helpers/phone-number.js";
 import { isWhatsBotCommand } from "./whatsapp-command.js";
@@ -400,6 +401,27 @@ class WhatsAppClientManager {
                 ? new Date(sentMessage.timestamp * 1000).toISOString()
                 : new Date().toISOString(),
         };
+    }
+
+    /**
+     * Verifies that one target can be resolved immediately by the ready client.
+     */
+    async assertTargetReachable(target) {
+        const normalizedTarget = normalizeMessageTarget(
+            typeof target === "string"
+                ? { phoneNumber: target }
+                : target,
+        );
+
+        if (!this.client || !this.isReady() || normalizedTarget.targetType !== CONTACT_TARGET_TYPE) {
+            return;
+        }
+
+        try {
+            await this.resolveWhatsAppChatId(normalizedTarget.phoneNumber);
+        } catch (error) {
+            throw new HttpError(400, error.message);
+        }
     }
 
     /**
