@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import test from "node:test";
 import { createApp } from "../app.js";
+import { HttpError } from "../helpers/error.js";
 
 /**
  * Starts the API app on an ephemeral port for route testing.
@@ -141,6 +142,55 @@ test("POST /messages accepts an explicit session id", async () => {
         assert.equal(createdPayload.targetType, "contact");
         assert.equal(createdPayload.targetValue, "5551999999999");
         assert.equal(payload.data.scheduledMessage.sessionId, "sales-team");
+    } finally {
+        await stopTestServer(server);
+    }
+});
+
+test("POST /messages rejects one unreachable contact when the session is ready", async () => {
+    let createdPayload = null;
+    const scheduledMessageModel = {
+        async create(payload) {
+            createdPayload = payload;
+            return payload;
+        },
+    };
+    const whatsappClient = {
+        async assertAuthorizedSession() {},
+        async assertMessageTargetReachable() {
+            throw new HttpError(400, "WhatsApp could not resolve a registered account for 64540523888721.");
+        },
+        getDefaultSessionId() {
+            return "main";
+        },
+        getKnownSessionState() {
+            return { status: "ready" };
+        },
+        getActiveSessionCount() {
+            return 1;
+        },
+    };
+    const server = await startTestServer({ scheduledMessageModel, whatsappClient });
+    const { port } = server.address();
+
+    try {
+        const response = await fetch(`http://127.0.0.1:${port}/messages`, {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+            },
+            body: JSON.stringify({
+                phoneNumber: "64540523888721",
+                message: "hello world",
+                scheduledFor: "2026-04-15T18:30:00Z",
+            }),
+        });
+        const payload = await response.json();
+
+        assert.equal(response.status, 400);
+        assert.equal(payload.error, true);
+        assert.match(payload.message, /could not resolve a registered account/i);
+        assert.equal(createdPayload, null);
     } finally {
         await stopTestServer(server);
     }

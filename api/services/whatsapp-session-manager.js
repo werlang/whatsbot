@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { appConfig } from "../config/app-config.js";
+import { normalizeMessageTarget } from "../helpers/message-target.js";
 import { normalizeSessionId } from "../helpers/session.js";
 import { ScheduledMessage } from "../model/scheduled-message.js";
 import { buildCommandErrorReply, buildScheduledCommandReply, parseWhatsBotCommand } from "./whatsapp-command.js";
@@ -123,6 +124,21 @@ class WhatsAppSessionManager {
             allowDefaultSession: true,
             defaultSessionId: this.getDefaultSessionId(),
         });
+    }
+
+    /**
+     * Validates one target eagerly when the requested session is already ready.
+     */
+    async assertMessageTargetReachable(sessionId, target) {
+        const normalizedSessionId = normalizeSessionId(sessionId);
+        const normalizedTarget = normalizeMessageTarget(target);
+        const session = await this.ensureSession(normalizedSessionId);
+
+        if (!session.isReady()) {
+            return;
+        }
+
+        await session.assertTargetReachable(normalizedTarget);
     }
 
     /**

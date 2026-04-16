@@ -40,6 +40,7 @@ function createMessagesRouter({
         try {
             const payload = parseScheduledMessagePayload(req.body);
             await whatsappClientManager.assertAuthorizedSession(payload.sessionId, req.get("x-whatsbot-session-token") || "");
+            await whatsappClientManager.assertMessageTargetReachable?.(payload.sessionId, payload);
             const scheduledMessage = await scheduledMessageModel.create(payload);
             return sendCreated(res, {
                 data: { scheduledMessage },
