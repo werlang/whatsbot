@@ -20,3 +20,15 @@ CREATE TABLE IF NOT EXISTS scheduled_messages (
     INDEX idx_scheduled_messages_due (status, scheduled_for),
     INDEX idx_scheduled_messages_claim_token (claim_token)
 );
+
+CREATE TABLE IF NOT EXISTS whatsapp_session_access (
+    session_id VARCHAR(64) NOT NULL PRIMARY KEY,
+    access_token_hash CHAR(64) NOT NULL,
+    recovery_password_hash CHAR(64) NOT NULL,
+    recovery_password_salt CHAR(32) NOT NULL,
+    recovery_password_lookup CHAR(64) NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE KEY uk_whatsapp_session_access_token_hash (access_token_hash),
+    UNIQUE KEY uk_whatsapp_session_access_recovery_lookup (recovery_password_lookup)
+);

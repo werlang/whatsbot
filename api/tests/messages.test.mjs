@@ -100,8 +100,8 @@ test("POST /messages accepts an explicit session id", async () => {
         },
     };
     const whatsappClient = {
-        async assertAuthorizedSession(sessionId, password) {
-            authorizedPayload = { sessionId, password };
+        async assertAuthorizedSession(sessionId, accessToken) {
+            authorizedPayload = { sessionId, accessToken };
         },
         getDefaultSessionId() {
             return "main";
@@ -121,7 +121,7 @@ test("POST /messages accepts an explicit session id", async () => {
             method: "POST",
             headers: {
                 "content-type": "application/json",
-                "x-whatsbot-session-password": "amber-harbor-4821",
+                "x-whatsbot-session-token": "a".repeat(64),
             },
             body: JSON.stringify({
                 sessionId: "sales-team",
@@ -135,7 +135,7 @@ test("POST /messages accepts an explicit session id", async () => {
         assert.equal(response.status, 201);
         assert.deepEqual(authorizedPayload, {
             sessionId: "sales-team",
-            password: "amber-harbor-4821",
+            accessToken: "a".repeat(64),
         });
         assert.equal(createdPayload.sessionId, "sales-team");
         assert.equal(createdPayload.targetType, "contact");

@@ -51,24 +51,25 @@ class WhatsAppSessionManager {
     async createSession() {
         const sessionId = normalizeSessionId(crypto.randomUUID());
         const session = await this.ensureSession(sessionId);
-        const access = await this.sessionAccessStore.ensureSessionAccess(sessionId);
+        const access = await this.sessionAccessStore.createSessionAccess(sessionId);
 
         return {
             session: this.describeSession(sessionId, session),
-            accessPassword: access.accessPassword,
+            accessToken: access.accessToken,
+            recoveryPassword: access.recoveryPassword,
         };
     }
 
     /**
-     * Restores one existing session from its access password.
+     * Restores one existing session from its recovery password.
      */
-    async loginWithPassword(password) {
-        const access = await this.sessionAccessStore.findByPassword(password);
+    async loginWithRecoveryPassword(recoveryPassword) {
+        const access = await this.sessionAccessStore.loginWithRecoveryPassword(recoveryPassword);
         const session = await this.getSessionState(access.sessionId);
 
         return {
             session,
-            accessPassword: access.accessPassword,
+            accessToken: access.accessToken,
         };
     }
 
@@ -115,10 +116,10 @@ class WhatsAppSessionManager {
     }
 
     /**
-     * Verifies one session password before a protected session operation.
+     * Verifies one session token before a protected session operation.
      */
-    async assertAuthorizedSession(sessionId, password) {
-        await this.sessionAccessStore.assertSessionAccess(sessionId, password, {
+    async assertAuthorizedSession(sessionId, accessToken) {
+        await this.sessionAccessStore.assertSessionAccess(sessionId, accessToken, {
             allowDefaultSession: true,
             defaultSessionId: this.getDefaultSessionId(),
         });

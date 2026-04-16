@@ -1,7 +1,7 @@
 const ACTIVE_SESSION_ID_STORAGE_KEY = "whatsbot.sessionId";
-const ACTIVE_SESSION_PASSWORD_STORAGE_KEY = "whatsbot.sessionPassword";
+const ACTIVE_SESSION_TOKEN_STORAGE_KEY = "whatsbot.sessionToken";
 const PENDING_SESSION_ID_STORAGE_KEY = "whatsbot.pendingSessionId";
-const PENDING_SESSION_PASSWORD_STORAGE_KEY = "whatsbot.pendingSessionPassword";
+const PENDING_SESSION_TOKEN_STORAGE_KEY = "whatsbot.pendingSessionToken";
 
 /**
  * Normalizes one browser-stored session token.
@@ -67,10 +67,10 @@ function readStoredSessionId(storage = globalThis.localStorage) {
 }
 
 /**
- * Reads the active session password stored in the browser.
+ * Reads the active session token stored in the browser.
  */
-function readStoredSessionPassword(storage = globalThis.localStorage) {
-    return readStorageValue(ACTIVE_SESSION_PASSWORD_STORAGE_KEY, storage);
+function readStoredSessionToken(storage = globalThis.localStorage) {
+    return readStorageValue(ACTIVE_SESSION_TOKEN_STORAGE_KEY, storage);
 }
 
 /**
@@ -78,34 +78,34 @@ function readStoredSessionPassword(storage = globalThis.localStorage) {
  */
 function readStoredSessionAccess(storage = globalThis.localStorage) {
     const sessionId = readStoredSessionId(storage);
-    const accessPassword = readStoredSessionPassword(storage);
+    const accessToken = readStoredSessionToken(storage);
 
-    if (!sessionId || !accessPassword) {
+    if (!sessionId || !accessToken) {
         return {
             sessionId: "",
-            accessPassword: "",
+            accessToken: "",
         };
     }
 
     return {
         sessionId,
-        accessPassword,
+        accessToken,
     };
 }
 
 /**
  * Persists one active session access bundle for later browser visits.
  */
-function persistSessionAccess({ sessionId, accessPassword } = {}, storage = globalThis.localStorage) {
+function persistSessionAccess({ sessionId, accessToken } = {}, storage = globalThis.localStorage) {
     const normalizedSessionId = normalizeStoredValue(sessionId);
-    const normalizedAccessPassword = normalizeStoredValue(accessPassword);
+    const normalizedAccessToken = normalizeStoredValue(accessToken);
 
-    if (!normalizedSessionId || !normalizedAccessPassword) {
+    if (!normalizedSessionId || !normalizedAccessToken) {
         return;
     }
 
     writeStorageValue(ACTIVE_SESSION_ID_STORAGE_KEY, normalizedSessionId, storage);
-    writeStorageValue(ACTIVE_SESSION_PASSWORD_STORAGE_KEY, normalizedAccessPassword, storage);
+    writeStorageValue(ACTIVE_SESSION_TOKEN_STORAGE_KEY, normalizedAccessToken, storage);
 }
 
 /**
@@ -113,7 +113,7 @@ function persistSessionAccess({ sessionId, accessPassword } = {}, storage = glob
  */
 function clearStoredSessionAccess(storage = globalThis.localStorage) {
     writeStorageValue(ACTIVE_SESSION_ID_STORAGE_KEY, "", storage);
-    writeStorageValue(ACTIVE_SESSION_PASSWORD_STORAGE_KEY, "", storage);
+    writeStorageValue(ACTIVE_SESSION_TOKEN_STORAGE_KEY, "", storage);
 }
 
 /**
@@ -121,34 +121,34 @@ function clearStoredSessionAccess(storage = globalThis.localStorage) {
  */
 function readPendingSessionAccess(storage = globalThis.localStorage) {
     const sessionId = readStorageValue(PENDING_SESSION_ID_STORAGE_KEY, storage);
-    const accessPassword = readStorageValue(PENDING_SESSION_PASSWORD_STORAGE_KEY, storage);
+    const accessToken = readStorageValue(PENDING_SESSION_TOKEN_STORAGE_KEY, storage);
 
-    if (!sessionId || !accessPassword) {
+    if (!sessionId || !accessToken) {
         return {
             sessionId: "",
-            accessPassword: "",
+            accessToken: "",
         };
     }
 
     return {
         sessionId,
-        accessPassword,
+        accessToken,
     };
 }
 
 /**
  * Persists the pending login session access bundle.
  */
-function persistPendingSessionAccess({ sessionId, accessPassword } = {}, storage = globalThis.localStorage) {
+function persistPendingSessionAccess({ sessionId, accessToken } = {}, storage = globalThis.localStorage) {
     const normalizedSessionId = normalizeStoredValue(sessionId);
-    const normalizedAccessPassword = normalizeStoredValue(accessPassword);
+    const normalizedAccessToken = normalizeStoredValue(accessToken);
 
-    if (!normalizedSessionId || !normalizedAccessPassword) {
+    if (!normalizedSessionId || !normalizedAccessToken) {
         return;
     }
 
     writeStorageValue(PENDING_SESSION_ID_STORAGE_KEY, normalizedSessionId, storage);
-    writeStorageValue(PENDING_SESSION_PASSWORD_STORAGE_KEY, normalizedAccessPassword, storage);
+    writeStorageValue(PENDING_SESSION_TOKEN_STORAGE_KEY, normalizedAccessToken, storage);
 }
 
 /**
@@ -156,24 +156,24 @@ function persistPendingSessionAccess({ sessionId, accessPassword } = {}, storage
  */
 function clearPendingSessionAccess(storage = globalThis.localStorage) {
     writeStorageValue(PENDING_SESSION_ID_STORAGE_KEY, "", storage);
-    writeStorageValue(PENDING_SESSION_PASSWORD_STORAGE_KEY, "", storage);
+    writeStorageValue(PENDING_SESSION_TOKEN_STORAGE_KEY, "", storage);
 }
 
 /**
  * Promotes one pending session access bundle into the active login state.
  */
-function activateSessionAccess({ sessionId, accessPassword } = {}, storage = globalThis.localStorage) {
-    persistSessionAccess({ sessionId, accessPassword }, storage);
+function activateSessionAccess({ sessionId, accessToken } = {}, storage = globalThis.localStorage) {
+    persistSessionAccess({ sessionId, accessToken }, storage);
     clearPendingSessionAccess(storage);
 }
 
 /**
- * Builds the authenticated API headers for one session password.
+ * Builds the authenticated API headers for one session token.
  */
-function buildSessionAccessHeaders(accessPassword) {
-    const normalizedAccessPassword = normalizeStoredValue(accessPassword);
-    return normalizedAccessPassword
-        ? { "x-whatsbot-session-password": normalizedAccessPassword }
+function buildSessionAccessHeaders(accessToken) {
+    const normalizedAccessToken = normalizeStoredValue(accessToken);
+    return normalizedAccessToken
+        ? { "x-whatsbot-session-token": normalizedAccessToken }
         : {};
 }
 
@@ -187,6 +187,6 @@ export {
     readSessionIdFromUrl,
     readStoredSessionId,
     readStoredSessionAccess,
-    readStoredSessionPassword,
+    readStoredSessionToken,
     readPendingSessionAccess,
 };

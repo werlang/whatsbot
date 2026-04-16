@@ -1,5 +1,5 @@
 import { Model } from "./model.js";
-import { normalizeAccessPassword, normalizeSessionId } from "../helpers/session.js";
+import { normalizeSessionId } from "../helpers/session.js";
 
 /**
  * Persists the mapping between app session ids and user-facing access passwords.
@@ -8,7 +8,10 @@ class WhatsAppSessionAccess extends Model {
     static table = "whatsapp_session_access";
     static view = [
         "session_id",
-        "access_password",
+        "access_token_hash",
+        "recovery_password_hash",
+        "recovery_password_salt",
+        "recovery_password_lookup",
         "created_at",
         "updated_at",
     ];
@@ -23,7 +26,10 @@ class WhatsAppSessionAccess extends Model {
 
         return {
             sessionId: normalizeSessionId(row.sessionId || row.session_id, { required: true }),
-            accessPassword: normalizeAccessPassword(row.accessPassword || row.access_password, { required: true }),
+            accessTokenHash: String(row.accessTokenHash || row.access_token_hash || "").trim().toLowerCase(),
+            recoveryPasswordHash: String(row.recoveryPasswordHash || row.recovery_password_hash || "").trim().toLowerCase(),
+            recoveryPasswordSalt: String(row.recoveryPasswordSalt || row.recovery_password_salt || "").trim().toLowerCase(),
+            recoveryPasswordLookup: String(row.recoveryPasswordLookup || row.recovery_password_lookup || "").trim().toLowerCase(),
             createdAt: row.createdAt || row.created_at
                 ? new Date(row.createdAt || row.created_at).toISOString()
                 : null,
@@ -42,7 +48,10 @@ class WhatsAppSessionAccess extends Model {
 
         return {
             session_id: normalizeSessionId(payload.sessionId, { required: true }),
-            access_password: normalizeAccessPassword(payload.accessPassword, { required: true }),
+            access_token_hash: String(payload.accessTokenHash || "").trim().toLowerCase(),
+            recovery_password_hash: String(payload.recoveryPasswordHash || "").trim().toLowerCase(),
+            recovery_password_salt: String(payload.recoveryPasswordSalt || "").trim().toLowerCase(),
+            recovery_password_lookup: String(payload.recoveryPasswordLookup || "").trim().toLowerCase(),
             created_at: this.driver.toDateTime(createdAt),
             updated_at: this.driver.toDateTime(updatedAt),
         };
@@ -56,10 +65,17 @@ class WhatsAppSessionAccess extends Model {
     }
 
     /**
-     * Returns one access record by user-facing password.
+     * Returns one access record by password lookup hash.
      */
-    static async findByPassword(accessPassword) {
-        return this.get({ access_password: normalizeAccessPassword(accessPassword, { required: true }) });
+    static async findByRecoveryPasswordLookup(recoveryPasswordLookup) {
+        return this.get({ recovery_password_lookup: String(recoveryPasswordLookup || "").trim().toLowerCase() });
+    }
+
+    /**
+     * Returns one access record by bearer-token hash.
+     */
+    static async findByAccessTokenHash(accessTokenHash) {
+        return this.get({ access_token_hash: String(accessTokenHash || "").trim().toLowerCase() });
     }
 
     /**

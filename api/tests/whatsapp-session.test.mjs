@@ -400,7 +400,8 @@ test("POST /whatsapp/sessions creates a new session envelope", async () => {
                     lastEventAt: null,
                     disconnectReason: null,
                 },
-                accessPassword: "amber-harbor-4821",
+                    accessToken: "a".repeat(64),
+                    recoveryPassword: "amber-harbor-signal-voyage-willow-summit-4821",
             };
         },
         getDefaultSessionId() {
@@ -455,18 +456,19 @@ test("POST /whatsapp/sessions creates a new session envelope", async () => {
         assert.equal(response.status, 201);
         assert.equal(payload.error, false);
         assert.equal(payload.data.session.sessionId, "alpha");
-        assert.equal(payload.data.accessPassword, "amber-harbor-4821");
+        assert.equal(payload.data.accessToken, "a".repeat(64));
+        assert.equal(payload.data.recoveryPassword, "amber-harbor-signal-voyage-willow-summit-4821");
         assert.equal(payload.message, "WhatsApp session created.");
     } finally {
         await stopTestServer(server);
     }
 });
 
-test("POST /whatsapp/sessions/login restores one session by password", async () => {
-    let receivedPassword = null;
+test("POST /whatsapp/sessions/login restores one session by recovery password", async () => {
+    let receivedRecoveryPassword = null;
     const whatsappClient = {
-        async loginWithPassword(password) {
-            receivedPassword = password;
+        async loginWithRecoveryPassword(recoveryPassword) {
+            receivedRecoveryPassword = recoveryPassword;
             return {
                 session: {
                     sessionId: "alpha",
@@ -492,7 +494,7 @@ test("POST /whatsapp/sessions/login restores one session by password", async () 
                     lastEventAt: null,
                     disconnectReason: null,
                 },
-                accessPassword: "amber-harbor-4821",
+                accessToken: "b".repeat(64),
             };
         },
         getDefaultSessionId() {
@@ -541,16 +543,16 @@ test("POST /whatsapp/sessions/login restores one session by password", async () 
                 "content-type": "application/json",
             },
             body: JSON.stringify({
-                password: "amber-harbor-4821",
+                recoveryPassword: "amber-harbor-signal-voyage-willow-summit-4821",
             }),
         });
         const payload = await response.json();
 
         assert.equal(response.status, 200);
-        assert.equal(receivedPassword, "amber-harbor-4821");
+        assert.equal(receivedRecoveryPassword, "amber-harbor-signal-voyage-willow-summit-4821");
         assert.equal(payload.error, false);
         assert.equal(payload.data.session.sessionId, "alpha");
-        assert.equal(payload.data.accessPassword, "amber-harbor-4821");
+        assert.equal(payload.data.accessToken, "b".repeat(64));
         assert.equal(payload.message, "WhatsApp session restored.");
     } finally {
         await stopTestServer(server);

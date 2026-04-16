@@ -78,7 +78,7 @@ test("GET /login renders the session pairing flow", async () => {
         assert.match(body, /id="login-existing-session-button"/);
         assert.match(body, /id="session-secret-dialog"/);
         assert.match(body, /data-role="session-secret-send-now"/);
-        assert.match(body, /Copy the password now/);
+        assert.match(body, /Copy the recovery password now/);
         assert.match(body, /Pairing status/);
         assert.match(body, /id="session-status"/);
         assert.match(body, /data-role="session-check-now"/);

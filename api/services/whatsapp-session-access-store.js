@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { HttpError } from "../helpers/error.js";
-import { normalizeAccessPassword, normalizeSessionId } from "../helpers/session.js";
+import { normalizeAccessToken, normalizeRecoveryPassword, normalizeSessionId } from "../helpers/session.js";
 import { WhatsAppSessionAccess } from "../model/whatsapp-session-access.js";
 
 const ACCESS_PASSWORD_ADJECTIVES = [
@@ -85,6 +85,15 @@ const ACCESS_PASSWORD_NOUNS = [
     "wave",
     "window",
 ];
+const RECOVERY_PASSWORD_WORDS = [...new Set([
+    ...ACCESS_PASSWORD_ADJECTIVES,
+    ...ACCESS_PASSWORD_NOUNS,
+])];
+const ACCESS_TOKEN_BYTES = 32;
+const RECOVERY_PASSWORD_WORD_COUNT = 6;
+const RECOVERY_PASSWORD_NUMBER_MIN = 1000;
+const RECOVERY_PASSWORD_NUMBER_MAX = 10000;
+const RECOVERY_PASSWORD_HASH_BYTES = 32;
 
 /**
  * Stores the mapping between public session ids and user-facing access passwords.
@@ -121,61 +130,61 @@ class WhatsAppSessionAccessStore {
     async getBySessionId(sessionId) {
         await this.initialize();
         const entry = await this.sessionAccessModel.findBySessionId(sessionId);
-        return entry ? this.cloneEntry(entry) : null;
+        return entry ? this.cloneMetadata(entry) : null;
     }
 
     /**
-     * Ensures one session id has a persistent access password.
+     * Creates one persistent access bundle for a new session.
      */
-    async ensureSessionAccess(sessionId) {
+    async createSessionAccess(sessionId) {
         await this.initialize();
         const normalizedSessionId = normalizeSessionId(sessionId, { required: true });
         const existingEntry = await this.sessionAccessModel.findBySessionId(normalizedSessionId);
 
         if (existingEntry) {
-            return this.cloneEntry(existingEntry);
+            throw new HttpError(409, "Session access already exists for that session.");
         }
 
-        return this.cloneEntry(await this.createSessionAccess({ sessionId: normalizedSessionId }));
+        return this.createPersistedSessionAccess({ sessionId: normalizedSessionId });
     }
 
     /**
-     * Resolves one access password into a known session entry.
+     * Resolves one recovery password into a known session and rotates the bearer token.
      */
-    async findByPassword(password) {
+    async loginWithRecoveryPassword(recoveryPassword) {
         await this.initialize();
-        const normalizedPassword = normalizeAccessPassword(password, { required: true });
-        const entry = await this.findOptionalByPassword(normalizedPassword);
-        if (!entry) {
-            throw new HttpError(401, "Invalid session password.");
+        const normalizedRecoveryPassword = normalizeRecoveryPassword(recoveryPassword, { required: true });
+        const entry = await this.findOptionalByRecoveryPassword(normalizedRecoveryPassword);
+        if (!entry || !this.verifyRecoveryPassword(normalizedRecoveryPassword, entry)) {
+            throw new HttpError(401, "Invalid recovery password.");
         }
 
-        return this.cloneEntry(entry);
+        return this.rotateAccessToken(entry);
     }
 
     /**
-     * Verifies that one session id matches the supplied password.
+     * Verifies that one session id matches the supplied bearer token.
      */
-    async assertSessionAccess(sessionId, password, { allowDefaultSession = false, defaultSessionId = "main" } = {}) {
+    async assertSessionAccess(sessionId, accessToken, { allowDefaultSession = false, defaultSessionId = "main" } = {}) {
         await this.initialize();
         const normalizedSessionId = normalizeSessionId(sessionId, { required: true });
         const normalizedDefaultSessionId = normalizeSessionId(defaultSessionId, { fallback: "main" });
 
-        if (allowDefaultSession && normalizedSessionId === normalizedDefaultSessionId && !String(password ?? "").trim()) {
+        if (allowDefaultSession && normalizedSessionId === normalizedDefaultSessionId && !String(accessToken ?? "").trim()) {
             return null;
         }
 
         const entry = await this.sessionAccessModel.findBySessionId(normalizedSessionId);
         if (!entry) {
-            throw new HttpError(401, "Session password is required.");
+            throw new HttpError(401, "Session token is required.");
         }
 
-        const normalizedPassword = normalizeAccessPassword(password, { required: true });
-        if (entry.accessPassword !== normalizedPassword) {
-            throw new HttpError(401, "Invalid session password.");
+        const normalizedAccessToken = normalizeAccessToken(accessToken, { required: true });
+        if (!this.matchesAccessToken(entry, normalizedAccessToken)) {
+            throw new HttpError(401, "Invalid session token.");
         }
 
-        return this.cloneEntry(entry);
+        return this.cloneMetadata(entry);
     }
 
     /**
@@ -200,11 +209,11 @@ class WhatsAppSessionAccessStore {
             try {
                 const entry = {
                     sessionId: normalizeSessionId(candidate?.sessionId, { required: true }),
-                    accessPassword: normalizeAccessPassword(candidate?.accessPassword, { required: true }),
+                    recoveryPassword: normalizeRecoveryPassword(candidate?.accessPassword, { required: true }),
                     createdAt: String(candidate?.createdAt || "").trim() || new Date().toISOString(),
                 };
 
-                await this.createSessionAccess(entry, { preserveAccessPassword: true });
+                await this.createPersistedSessionAccess(entry, { preserveRecoveryPassword: true });
             } catch (error) {
                 this.logger.warn("Skipping legacy session access registry entry:", error?.message || error);
             }
@@ -212,25 +221,33 @@ class WhatsAppSessionAccessStore {
     }
 
     /**
-     * Creates one persisted access record, retrying password collisions when needed.
+     * Creates one persisted access record, retrying secret collisions when needed.
      */
-    async createSessionAccess({ sessionId, accessPassword = "", createdAt = null } = {}, { preserveAccessPassword = false } = {}) {
+    async createPersistedSessionAccess({ sessionId, recoveryPassword = "", createdAt = null } = {}, { preserveRecoveryPassword = false } = {}) {
         const normalizedSessionId = normalizeSessionId(sessionId, { required: true });
 
         for (let attempt = 0; attempt < 50; attempt += 1) {
-            const candidatePassword = preserveAccessPassword
-                ? normalizeAccessPassword(accessPassword, { required: true })
-                : this.generateUniqueAccessPassword();
+            const candidateRecoveryPassword = preserveRecoveryPassword
+                ? normalizeRecoveryPassword(recoveryPassword, { required: true })
+                : this.generateRecoveryPassword();
+            const accessToken = this.generateAccessToken();
+            const recoveryPasswordSalt = this.generateRecoveryPasswordSalt();
 
             try {
                 const entry = await this.sessionAccessModel.create({
                     sessionId: normalizedSessionId,
-                    accessPassword: candidatePassword,
+                    accessTokenHash: this.hashSecret(normalizeAccessToken(accessToken, { required: true })),
+                    recoveryPasswordHash: this.hashRecoveryPassword(candidateRecoveryPassword, recoveryPasswordSalt),
+                    recoveryPasswordSalt,
+                    recoveryPasswordLookup: this.hashSecret(candidateRecoveryPassword),
                     createdAt,
                     updatedAt: createdAt,
                 });
 
-                return this.cloneEntry(entry);
+                return this.buildIssuedAccess(entry, {
+                    accessToken,
+                    recoveryPassword: candidateRecoveryPassword,
+                });
             } catch (error) {
                 if (!this.isDuplicateEntryError(error)) {
                     throw error;
@@ -238,27 +255,28 @@ class WhatsAppSessionAccessStore {
 
                 const existingEntry = await this.sessionAccessModel.findBySessionId(normalizedSessionId);
                 if (existingEntry) {
-                    return this.cloneEntry(existingEntry);
+                    throw new HttpError(409, "Session access already exists for that session.");
                 }
 
-                if (preserveAccessPassword) {
-                    const existingPasswordEntry = await this.findOptionalByPassword(candidatePassword);
+                if (preserveRecoveryPassword) {
+                    const existingPasswordEntry = await this.findOptionalByRecoveryPassword(candidateRecoveryPassword);
 
                     if (existingPasswordEntry && existingPasswordEntry.sessionId !== normalizedSessionId) {
-                        throw new HttpError(409, "Session password already belongs to a different session.");
+                        throw new HttpError(409, "Recovery password already belongs to a different session.");
                     }
                 }
             }
         }
 
-        throw new HttpError(500, "Could not generate a unique session password.");
+        throw new HttpError(500, "Could not generate a unique recovery password.");
     }
 
     /**
-     * Returns one access entry for a password when it exists.
+     * Returns one access entry for a recovery password when it exists.
      */
-    async findOptionalByPassword(password) {
-        return this.sessionAccessModel.findByPassword(password);
+    async findOptionalByRecoveryPassword(recoveryPassword) {
+        const lookupHash = this.hashSecret(normalizeRecoveryPassword(recoveryPassword, { required: true }));
+        return this.sessionAccessModel.findByRecoveryPasswordLookup(lookupHash);
     }
 
     /**
@@ -269,23 +287,137 @@ class WhatsAppSessionAccessStore {
     }
 
     /**
-     * Creates one user-friendly access password that is not yet in use.
+     * Rotates the bearer token for one existing session entry.
      */
-    generateUniqueAccessPassword() {
-        return [
-            ACCESS_PASSWORD_ADJECTIVES[crypto.randomInt(0, ACCESS_PASSWORD_ADJECTIVES.length)],
-            ACCESS_PASSWORD_NOUNS[crypto.randomInt(0, ACCESS_PASSWORD_NOUNS.length)],
-            String(crypto.randomInt(1000, 10000)),
-        ].join("-");
+    async rotateAccessToken(entry) {
+        const sessionEntry = entry?.sessionId
+            ? entry
+            : await this.sessionAccessModel.findBySessionId(entry);
+
+        if (!sessionEntry) {
+            throw new HttpError(401, "Invalid recovery password.");
+        }
+
+        for (let attempt = 0; attempt < 50; attempt += 1) {
+            const accessToken = this.generateAccessToken();
+
+            try {
+                await this.sessionAccessModel.update({ session_id: sessionEntry.sessionId }, {
+                    sessionId: sessionEntry.sessionId,
+                    accessTokenHash: this.hashSecret(accessToken),
+                    recoveryPasswordHash: sessionEntry.recoveryPasswordHash,
+                    recoveryPasswordSalt: sessionEntry.recoveryPasswordSalt,
+                    recoveryPasswordLookup: sessionEntry.recoveryPasswordLookup,
+                    createdAt: sessionEntry.createdAt,
+                    updatedAt: new Date().toISOString(),
+                });
+
+                const updatedEntry = await this.sessionAccessModel.findBySessionId(sessionEntry.sessionId);
+                return this.buildIssuedAccess(updatedEntry, { accessToken });
+            } catch (error) {
+                if (!this.isDuplicateEntryError(error)) {
+                    throw error;
+                }
+            }
+        }
+
+        throw new HttpError(500, "Could not rotate the session token.");
     }
 
     /**
-     * Clones one entry so callers cannot mutate the store state.
+     * Creates one random bearer token for the browser session.
      */
-    cloneEntry(entry) {
+    generateAccessToken() {
+        return crypto.randomBytes(ACCESS_TOKEN_BYTES).toString("hex");
+    }
+
+    /**
+     * Creates one human-friendly recovery password.
+     */
+    generateRecoveryPassword() {
+        const words = [];
+
+        for (let index = 0; index < RECOVERY_PASSWORD_WORD_COUNT; index += 1) {
+            words.push(RECOVERY_PASSWORD_WORDS[crypto.randomInt(0, RECOVERY_PASSWORD_WORDS.length)]);
+        }
+
+        words.push(String(crypto.randomInt(RECOVERY_PASSWORD_NUMBER_MIN, RECOVERY_PASSWORD_NUMBER_MAX)));
+
+        return words.join("-");
+    }
+
+    /**
+     * Creates one fresh salt for the recovery-password hash.
+     */
+    generateRecoveryPasswordSalt() {
+        return crypto.randomBytes(16).toString("hex");
+    }
+
+    /**
+     * Hashes one secret with SHA-256 for deterministic lookups.
+     */
+    hashSecret(secret) {
+        return crypto.createHash("sha256").update(String(secret || "")).digest("hex");
+    }
+
+    /**
+     * Derives one recovery-password hash using scrypt.
+     */
+    hashRecoveryPassword(recoveryPassword, salt) {
+        return crypto.scryptSync(recoveryPassword, salt, RECOVERY_PASSWORD_HASH_BYTES).toString("hex");
+    }
+
+    /**
+     * Returns true when one supplied access token matches the stored hash.
+     */
+    matchesAccessToken(entry, accessToken) {
+        return this.safeEqualHex(entry.accessTokenHash, this.hashSecret(accessToken));
+    }
+
+    /**
+     * Returns true when one supplied recovery password matches the stored hash.
+     */
+    verifyRecoveryPassword(recoveryPassword, entry) {
+        return this.safeEqualHex(
+            entry.recoveryPasswordHash,
+            this.hashRecoveryPassword(recoveryPassword, entry.recoveryPasswordSalt),
+        );
+    }
+
+    /**
+     * Compares two hexadecimal digests in constant time when possible.
+     */
+    safeEqualHex(left, right) {
+        const leftBuffer = Buffer.from(String(left || ""), "hex");
+        const rightBuffer = Buffer.from(String(right || ""), "hex");
+
+        if (leftBuffer.length === 0 || leftBuffer.length !== rightBuffer.length) {
+            return false;
+        }
+
+        return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+    }
+
+    /**
+     * Builds the issued secret payload returned to callers.
+     */
+    buildIssuedAccess(entry, { accessToken, recoveryPassword = "" } = {}) {
         return {
             sessionId: entry.sessionId,
-            accessPassword: entry.accessPassword,
+            accessToken: normalizeAccessToken(accessToken, { required: true }),
+            recoveryPassword: recoveryPassword
+                ? normalizeRecoveryPassword(recoveryPassword, { required: true })
+                : "",
+            createdAt: entry.createdAt,
+        };
+    }
+
+    /**
+     * Clones one stored entry metadata so callers cannot mutate the store state.
+     */
+    cloneMetadata(entry) {
+        return {
+            sessionId: entry.sessionId,
             createdAt: entry.createdAt,
         };
     }

@@ -117,7 +117,7 @@ function setFeedback(node, tone, message) {
 function renderOnboardingSteps(elements, sessionAccess, description = {}) {
     const states = {
         create: sessionAccess?.sessionId ? "completed" : "active",
-        copy: sessionAccess?.accessPassword ? (description.showQr || description.label === "Ready" ? "completed" : "active") : "pending",
+        copy: sessionAccess?.sessionId ? (description.showQr || description.label === "Ready" ? "completed" : "active") : "pending",
         scan: description.label === "Ready" ? "completed" : (sessionAccess?.sessionId ? "active" : "pending"),
     };
 
@@ -142,32 +142,39 @@ function setSessionSecretStatus(elements, message, tone = "") {
 }
 
 /**
- * Extracts the session id and password from one API response.
+ * Extracts the session id and access token from one API response.
  */
-function readSessionAccessFromResponse(response, fallbackPassword = "") {
+function readSessionAccessFromResponse(response) {
     const sessionId = String(response?.data?.session?.sessionId || "").trim();
-    const accessPassword = String(response?.data?.accessPassword || fallbackPassword || "").trim();
+    const accessToken = String(response?.data?.accessToken || "").trim();
 
-    if (!sessionId || !accessPassword) {
+    if (!sessionId || !accessToken) {
         return null;
     }
 
     return {
         sessionId,
-        accessPassword,
+        accessToken,
     };
 }
 
 /**
- * Shows the password modal with one new access password.
+ * Reads the recovery password from one API response.
  */
-function openSessionSecretDialog(elements, accessPassword) {
+function readRecoveryPasswordFromResponse(response) {
+    return String(response?.data?.recoveryPassword || "").trim();
+}
+
+/**
+ * Shows the password modal with one new recovery password.
+ */
+function openSessionSecretDialog(elements, recoveryPassword) {
     if (!elements.sessionSecretDialog || !elements.sessionSecretValue) {
         return;
     }
 
-    elements.sessionSecretValue.textContent = accessPassword;
-    setSessionSecretStatus(elements, "Copy and save this password.", "info");
+    elements.sessionSecretValue.textContent = recoveryPassword;
+    setSessionSecretStatus(elements, "Copy and save this recovery password.", "info");
 
     if (typeof elements.sessionSecretDialog.showModal === "function") {
         elements.sessionSecretDialog.showModal();
@@ -200,7 +207,7 @@ function closeSessionSecretDialog(elements) {
  * Stores one active session and opens the scheduler entrypoint.
  */
 function openSchedulerForSession(sessionAccess, { replace = false } = {}) {
-    if (!sessionAccess?.sessionId || !sessionAccess?.accessPassword) {
+    if (!sessionAccess?.sessionId || !sessionAccess?.accessToken) {
         return;
     }
 
@@ -424,7 +431,7 @@ function clearSessionRefresh(uiState) {
 function scheduleSessionRefresh(elements, sessionAccess, uiState, description) {
     clearSessionRefresh(uiState);
 
-    if (!sessionAccess?.sessionId || !sessionAccess?.accessPassword || description?.phase === "ready") {
+    if (!sessionAccess?.sessionId || !sessionAccess?.accessToken || description?.phase === "ready") {
         updatePairingGuidanceMeta(elements, uiState, {
             hasSession: Boolean(sessionAccess?.sessionId),
             isReady: description?.phase === "ready",
@@ -448,7 +455,7 @@ function scheduleSessionRefresh(elements, sessionAccess, uiState, description) {
  * Loads one session state and updates the pairing UX around it.
  */
 async function refreshSessionState(elements, sessionAccess, uiState, { redirectWhenReady = true, force = false } = {}) {
-    if (!sessionAccess?.sessionId || !sessionAccess?.accessPassword) {
+    if (!sessionAccess?.sessionId || !sessionAccess?.accessToken) {
         return null;
     }
 
@@ -497,15 +504,15 @@ async function refreshSessionState(elements, sessionAccess, uiState, { redirectW
 }
 
 /**
- * Loads one session state from the API using the session password.
+ * Loads one session state from the API using the session token.
  */
 async function loadSessionState(elements, sessionAccess, { redirectWhenReady = true } = {}) {
-    if (!sessionAccess?.sessionId || !sessionAccess?.accessPassword) {
+    if (!sessionAccess?.sessionId || !sessionAccess?.accessToken) {
         return null;
     }
 
     const response = await requestApi(`/whatsapp/sessions/${encodeURIComponent(sessionAccess.sessionId)}`, {
-        headers: buildSessionAccessHeaders(sessionAccess.accessPassword),
+        headers: buildSessionAccessHeaders(sessionAccess.accessToken),
     });
 
     console.debug("[WhatsBot] Login session refresh", {
@@ -516,7 +523,7 @@ async function loadSessionState(elements, sessionAccess, { redirectWhenReady = t
 
     if (response.status === 401) {
         clearPendingSessionAccess();
-        setFeedback(elements.feedback, "danger", "That session password is not valid anymore.");
+        setFeedback(elements.feedback, "danger", "That session token is not valid anymore.");
         return null;
     }
 
@@ -554,19 +561,20 @@ async function createSession(elements) {
         });
 
         const sessionAccess = readSessionAccessFromResponse(response);
-        if (!response.ok || !sessionAccess) {
+        const recoveryPassword = readRecoveryPasswordFromResponse(response);
+        if (!response.ok || !sessionAccess || !recoveryPassword) {
             setFeedback(elements.feedback, "danger", response.message || "Could not create the WhatsApp session.");
             return null;
         }
 
         console.debug("[WhatsBot] Session created", {
             sessionId: sessionAccess.sessionId,
-            accessPassword: sessionAccess.accessPassword,
+            hasAccessToken: Boolean(sessionAccess.accessToken),
         });
 
         persistPendingSessionAccess(sessionAccess);
-        openSessionSecretDialog(elements, sessionAccess.accessPassword);
-        setFeedback(elements.feedback, "success", "Session created. Copy the password, then scan the QR code.");
+        openSessionSecretDialog(elements, recoveryPassword);
+        setFeedback(elements.feedback, "success", "Session created. Copy the recovery password, then scan the QR code.");
         if (elements.existingPasswordInput) {
             elements.existingPasswordInput.value = "";
         }
@@ -580,16 +588,16 @@ async function createSession(elements) {
 }
 
 /**
- * Restores one existing session from the pasted password.
+ * Restores one existing session from the pasted recovery password.
  */
-async function loginWithPassword(elements) {
+async function loginWithRecoveryPassword(elements) {
     if (!elements.existingPasswordInput || !elements.existingPasswordButton) {
         return null;
     }
 
-    const password = elements.existingPasswordInput.value.trim();
-    if (!password) {
-        setFeedback(elements.feedback, "danger", "Paste the session password first.");
+    const recoveryPassword = elements.existingPasswordInput.value.trim();
+    if (!recoveryPassword) {
+        setFeedback(elements.feedback, "danger", "Paste the recovery password first.");
         return null;
     }
 
@@ -600,11 +608,11 @@ async function loginWithPassword(elements) {
         const response = await requestApi("/whatsapp/sessions/login", {
             method: "POST",
             body: {
-                password,
+                recoveryPassword,
             },
         });
 
-        const sessionAccess = readSessionAccessFromResponse(response, password);
+        const sessionAccess = readSessionAccessFromResponse(response);
         if (!response.ok || !sessionAccess) {
             setFeedback(elements.feedback, "danger", response.message || "Could not restore the WhatsApp session.");
             return null;
@@ -643,26 +651,26 @@ function initLoginPage() {
     let pendingSessionAccess = readPendingSessionAccess();
     renderOnboardingSteps(elements, pendingSessionAccess);
     renderPairingGuidance(elements, {}, uiState, {
-        hasSession: Boolean(pendingSessionAccess.sessionId && pendingSessionAccess.accessPassword),
+        hasSession: Boolean(pendingSessionAccess.sessionId && pendingSessionAccess.accessToken),
     });
 
-    if (pendingSessionAccess.sessionId && pendingSessionAccess.accessPassword) {
+    if (pendingSessionAccess.sessionId && pendingSessionAccess.accessToken) {
         void refreshSessionState(elements, pendingSessionAccess, uiState);
     }
 
     if (elements.sessionSecretCopy) {
         elements.sessionSecretCopy.addEventListener("click", async function() {
-            const accessPassword = elements.sessionSecretValue?.textContent?.trim() || "";
+            const recoveryPassword = elements.sessionSecretValue?.textContent?.trim() || "";
 
-            if (!accessPassword) {
+            if (!recoveryPassword) {
                 return;
             }
 
             try {
-                await copyToClipboard(accessPassword);
-                setSessionSecretStatus(elements, "Password copied. Keep it safe before continuing.", "success");
+                await copyToClipboard(recoveryPassword);
+                setSessionSecretStatus(elements, "Recovery password copied. Keep it safe before continuing.", "success");
             } catch {
-                setSessionSecretStatus(elements, "Could not copy automatically. Select the password and copy it manually.", "warning");
+                setSessionSecretStatus(elements, "Could not copy automatically. Select the recovery password and copy it manually.", "warning");
             }
         });
     }
@@ -688,7 +696,7 @@ function initLoginPage() {
 
     if (elements.sessionCheckNow) {
         elements.sessionCheckNow.addEventListener("click", function() {
-            if (!pendingSessionAccess.sessionId || !pendingSessionAccess.accessPassword) {
+            if (!pendingSessionAccess.sessionId || !pendingSessionAccess.accessToken) {
                 setFeedback(elements.feedback, "info", "Create or restore a session first.");
                 return;
             }
@@ -715,7 +723,7 @@ function initLoginPage() {
     if (elements.existingPasswordForm) {
         elements.existingPasswordForm.addEventListener("submit", async function(event) {
             event.preventDefault();
-            const restoredSessionAccess = await loginWithPassword(elements);
+            const restoredSessionAccess = await loginWithRecoveryPassword(elements);
             if (!restoredSessionAccess) {
                 return;
             }

@@ -1,7 +1,8 @@
 import { HttpError } from "./error.js";
 
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
-const ACCESS_PASSWORD_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const ACCESS_TOKEN_PATTERN = /^[a-f0-9]{64}$/;
+const RECOVERY_PASSWORD_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /**
  * Normalizes one app session identifier.
@@ -25,9 +26,30 @@ function normalizeSessionId(value, { fallback = "main", required = false } = {})
 }
 
 /**
- * Normalizes one human-friendly session access password.
+ * Normalizes one session bearer token.
  */
-function normalizeAccessPassword(value, { required = false } = {}) {
+function normalizeAccessToken(value, { required = false } = {}) {
+    const rawValue = String(value ?? "").trim().toLowerCase();
+
+    if (!rawValue) {
+        if (required) {
+            throw new HttpError(400, "session token is required.");
+        }
+
+        return "";
+    }
+
+    if (!ACCESS_TOKEN_PATTERN.test(rawValue)) {
+        throw new HttpError(400, "session token must be a 64-character hexadecimal string.");
+    }
+
+    return rawValue;
+}
+
+/**
+ * Normalizes one human-friendly recovery password.
+ */
+function normalizeRecoveryPassword(value, { required = false } = {}) {
     const rawValue = String(value ?? "")
         .trim()
         .toLowerCase()
@@ -35,17 +57,17 @@ function normalizeAccessPassword(value, { required = false } = {}) {
 
     if (!rawValue) {
         if (required) {
-            throw new HttpError(400, "password is required.");
+            throw new HttpError(400, "recoveryPassword is required.");
         }
 
         return "";
     }
 
-    if (!ACCESS_PASSWORD_PATTERN.test(rawValue) || rawValue.startsWith("-") || rawValue.endsWith("-") || rawValue.includes("--")) {
-        throw new HttpError(400, "password must contain only letters, numbers, and single hyphens.");
+    if (!RECOVERY_PASSWORD_PATTERN.test(rawValue) || rawValue.startsWith("-") || rawValue.endsWith("-") || rawValue.includes("--")) {
+        throw new HttpError(400, "recoveryPassword must contain only letters, numbers, and single hyphens.");
     }
 
     return rawValue;
 }
 
-export { normalizeAccessPassword, normalizeSessionId };
+export { normalizeAccessToken, normalizeRecoveryPassword, normalizeSessionId };

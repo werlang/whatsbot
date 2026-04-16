@@ -65,7 +65,7 @@
                     <article class="step-list__item" data-step="copy">
                         <p class="step-list__eyebrow">2</p>
                         <div>
-                            <h3>Copy the password</h3>
+                            <h3>Save the recovery password</h3>
                         </div>
                     </article>
 
@@ -83,13 +83,13 @@
 
                 <section class="form__section" aria-labelledby="restore-session-title">
                     <div class="field-heading">
-                        <h3 id="restore-session-title">Use a saved password</h3>
+                        <h3 id="restore-session-title">Use a saved recovery password</h3>
                     </div>
 
                     <form class="form" id="login-existing-session-form">
                         <label class="form__field" for="existing-session-password">
-                            <span>Password</span>
-                            <input id="existing-session-password" type="password" autocomplete="one-time-code" placeholder="Paste password">
+                            <span>Recovery password</span>
+                            <input id="existing-session-password" type="password" autocomplete="one-time-code" placeholder="Paste recovery password">
                         </label>
 
                         <button class="button button--ghost button--wide" id="login-existing-session-button" type="submit">Restore session</button>
@@ -145,13 +145,13 @@
 
         <dialog class="session-secret-modal" id="session-secret-dialog" aria-labelledby="session-secret-title">
             <div class="session-secret-modal__card">
-                <p class="session-secret-modal__eyebrow">Session password</p>
-                <h2 class="session-secret-modal__title" id="session-secret-title">Copy the password now</h2>
-                <p class="session-secret-modal__body">Save it before closing.</p>
+                <p class="session-secret-modal__eyebrow">Recovery password</p>
+                <h2 class="session-secret-modal__title" id="session-secret-title">Copy the recovery password now</h2>
+                <p class="session-secret-modal__body">Save it before closing. This browser keeps the session token for everyday use.</p>
                 <code class="session-secret-modal__value" data-role="session-secret-value"></code>
                 <p class="session-secret-modal__status" data-role="session-secret-status" hidden aria-live="polite"></p>
                 <div class="session-secret-modal__actions">
-                    <button class="button" data-role="session-secret-copy" type="button">Copy password</button>
+                    <button class="button" data-role="session-secret-copy" type="button">Copy recovery password</button>
                     <button class="button button--secondary" data-role="session-secret-send-now" type="button">Open workspace</button>
                     <button class="button button--secondary" data-role="session-secret-close" type="button">Done</button>
                 </div>

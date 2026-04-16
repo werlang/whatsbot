@@ -606,7 +606,7 @@ async function refreshSessionState(elements, sessionAccess, { force = false } = 
 
     try {
         const response = await requestApi(`/whatsapp/session?sessionId=${encodeURIComponent(sessionAccess.sessionId)}`, {
-            headers: buildSessionAccessHeaders(sessionAccess.accessPassword),
+            headers: buildSessionAccessHeaders(sessionAccess.accessToken),
         });
 
         console.debug("[WhatsBot] Scheduler session refresh", {
@@ -679,7 +679,7 @@ async function submitSchedule(event, elements, sessionAccess) {
         });
         const response = await requestApi("/messages", {
             method: "POST",
-            headers: buildSessionAccessHeaders(sessionAccess.accessPassword),
+            headers: buildSessionAccessHeaders(sessionAccess.accessToken),
             body: {
                 sessionId: sessionAccess.sessionId,
                 ...targetPayload,
@@ -746,7 +746,7 @@ function initSchedulerPage() {
     const routeSessionId = readSessionIdFromUrl();
     const activeSessionAccess = readStoredSessionAccess();
 
-    if (!activeSessionAccess.sessionId || !activeSessionAccess.accessPassword) {
+    if (!activeSessionAccess.sessionId || !activeSessionAccess.accessToken) {
         globalThis.location.replace("/login");
         return;
     }
