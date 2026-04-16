@@ -29,7 +29,15 @@ services:
             MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
         volumes:
             - mysql:/var/lib/mysql
-
+    tunnel:
+        image: cloudflare/cloudflared
+        restart: unless-stopped
+        command: tunnel --no-autoupdate run
+        environment:
+            - TUNNEL_TOKEN=${CLOUDFLARE_TOKEN}
+            - TUNNEL_METRICS=0.0.0.0:60123
+        env_file:
+            - .env
 volumes:
     mysql:
     whatsapp_auth:
