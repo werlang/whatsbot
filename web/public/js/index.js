@@ -75,6 +75,8 @@ function createElements() {
         activeSessionId: document.querySelector("[data-role=active-session-id]"),
         schedulePresetButtons: [...document.querySelectorAll("[data-role=schedule-preset]")],
         year: document.querySelector("[data-role=year]"),
+        sessionPanel: document.querySelector("[data-role=session-panel]"),
+        sessionReadyIndicator: document.querySelector("[data-role=session-ready-indicator]"),
         currentSession: null,
         recipientLabelByValue: new Map(),
         recipientValueByLabel: new Map(),
@@ -639,6 +641,17 @@ function hydrateFormDefaults(elements, sessionId) {
  * Renders the latest WhatsApp session summary on the page.
  */
 function renderSessionState(elements, description) {
+    const isReady = description.phase === "ready";
+
+    if (elements.sessionPanel) {
+        elements.sessionPanel.hidden = isReady;
+    }
+
+    if (elements.sessionReadyIndicator) {
+        elements.sessionReadyIndicator.hidden = !isReady;
+        elements.sessionReadyIndicator.dataset.tone = isReady ? "success" : "";
+    }
+
     if (elements.sessionStatus) {
         elements.sessionStatus.textContent = description.label;
         elements.sessionStatus.dataset.tone = description.tone;

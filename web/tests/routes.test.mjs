@@ -55,6 +55,8 @@ test("GET /session/main renders the scheduler UI shell", async () => {
         assert.match(body, /id="scheduled-for"/);
         assert.match(body, /data-role="schedule-form-kicker"/);
         assert.match(body, /data-role="schedule-cancel-edit"/);
+        assert.match(body, /data-role="session-panel"/);
+        assert.match(body, /data-role="session-ready-indicator"/);
         assert.match(body, /Connection/);
         assert.match(body, /id="session-status"/);
         assert.match(body, /Scheduled messages/);

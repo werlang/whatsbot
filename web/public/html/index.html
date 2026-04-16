@@ -25,6 +25,9 @@
 
             <div class="topbar__actions">
                 <p class="topbar__session">Session <strong data-role="active-session-id">main</strong></p>
+                <p class="topbar__connection" data-role="session-ready-indicator" hidden>
+                    <strong>Connected</strong>
+                </p>
                 <a class="button button--ghost" href="/login">Pair another phone</a>
             </div>
         </header>
@@ -123,7 +126,7 @@
             </section>
 
             <div class="panel-stack">
-                <aside class="panel panel--session" aria-labelledby="session-title">
+                <aside class="panel panel--session" data-role="session-panel" aria-labelledby="session-title">
                     <div class="panel__header">
                         <div>
                             <span class="panel__kicker">Status</span>
