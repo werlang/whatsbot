@@ -1,14 +1,25 @@
 const SESSION_STORAGE_KEY = "whatsbot.sessionId";
 
 /**
- * Reads one session id from the current URL query string.
+ * Reads one session id from the current URL path or query string.
  */
 function readSessionIdFromUrl(locationObject = globalThis.location) {
-    if (!locationObject?.search) {
+    if (!locationObject?.href) {
         return "";
     }
 
-    return new URLSearchParams(locationObject.search).get("sessionId") || "";
+    const url = new URL(locationObject.href);
+    const pathMatch = url.pathname.match(/^\/session\/([^/]+)$/);
+
+    if (pathMatch?.[1]) {
+        try {
+            return decodeURIComponent(pathMatch[1]);
+        } catch {
+            return pathMatch[1];
+        }
+    }
+
+    return url.searchParams.get("sessionId") || "";
 }
 
 /**
@@ -57,7 +68,8 @@ function writeSessionIdToUrl(sessionId, locationObject = globalThis.location, hi
     }
 
     const url = new URL(locationObject.href);
-    url.searchParams.set("sessionId", normalizedSessionId);
+    url.pathname = `/session/${encodeURIComponent(normalizedSessionId)}`;
+    url.searchParams.delete("sessionId");
     historyObject.replaceState({}, "", url);
 }
 

@@ -28,6 +28,12 @@ button {
     padding: 3rem 1.25rem 2.5rem;
 }
 
+.page-shell--gateway {
+    min-height: 100vh;
+    display: grid;
+    align-content: center;
+}
+
 .hero,
 .panel {
     background: rgba(255, 255, 255, 0.96);
@@ -39,6 +45,10 @@ button {
 .hero {
     padding: 2.5rem;
     margin-bottom: 1.5rem;
+}
+
+.hero--gateway {
+    text-align: center;
 }
 
 .hero__eyebrow {
@@ -79,6 +89,12 @@ button {
 
 .panel {
     padding: 1.5rem;
+}
+
+.panel--gateway {
+    max-width: 520px;
+    margin: 0 auto;
+    text-align: center;
 }
 
 .panel__header {
@@ -159,6 +175,15 @@ button {
     box-shadow: none;
 }
 
+.button--secondary {
+    background: #e7eefb;
+    color: #16315d;
+}
+
+.button--secondary:hover {
+    box-shadow: 0 10px 24px rgba(22, 49, 93, 0.12);
+}
+
 .feedback {
     margin-bottom: 1rem;
     padding: 0.9rem 1rem;
@@ -182,6 +207,83 @@ button {
     background: #fff0f0;
     border-color: #f0caca;
     color: #a12626;
+}
+
+.session-secret-modal {
+    width: min(100%, 520px);
+    padding: 0;
+    border: 0;
+    background: transparent;
+}
+
+.session-secret-modal::backdrop {
+    background: rgba(12, 20, 38, 0.56);
+    backdrop-filter: blur(4px);
+}
+
+.session-secret-modal__card {
+    display: grid;
+    gap: 1rem;
+    padding: 1.5rem;
+    border-radius: 24px;
+    border: 1px solid #d7e0f2;
+    background: #ffffff;
+    box-shadow: 0 28px 64px rgba(10, 26, 51, 0.18);
+}
+
+.session-secret-modal__eyebrow {
+    margin: 0;
+    color: #2555d9;
+    font-size: 0.84rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.session-secret-modal__title {
+    margin: 0;
+}
+
+.session-secret-modal__body,
+.session-secret-modal__status {
+    margin: 0;
+    line-height: 1.65;
+}
+
+.session-secret-modal__body {
+    color: #31466e;
+}
+
+.session-secret-modal__value {
+    padding: 1rem 1.1rem;
+    border-radius: 16px;
+    background: #f6f8fd;
+    border: 1px solid #d7e0f2;
+    color: #102033;
+    word-break: break-word;
+    font-size: 1.05rem;
+}
+
+.session-secret-modal__status[data-tone="info"] {
+    color: #1f4abf;
+}
+
+.session-secret-modal__status[data-tone="success"] {
+    color: #156c37;
+}
+
+.session-secret-modal__status[data-tone="warning"] {
+    color: #8a5b00;
+}
+
+.session-secret-modal__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.session-secret-modal__actions .button {
+    flex: 1 1 140px;
 }
 
 .session-card {

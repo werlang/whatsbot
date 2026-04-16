@@ -63,7 +63,7 @@ The web service uses:
 
 - Express 5 + Mustache SSR
 - a scheduler page at `/`
-- a dedicated login and pairing page at `/login`
+- a dedicated login and pairing page at `/session/:id` with `/login` kept as a redirect
 - direct static assets from `web/public/css` and `web/public/js`
 - browser-side polling of `GET /whatsapp/session` or `GET /whatsapp/sessions/:sessionId`
 - browser-side submission to `POST /messages`
@@ -103,7 +103,7 @@ docker compose -f compose.dev.yaml up --build
 Current development URLs and ports:
 
 - Web: `http://localhost`
-- Web login flow: `http://localhost/login`
+- Web login flow: `http://localhost/session/main`
 - API ready check: `http://localhost:3000/ready`
 - API session check: `http://localhost:3000/whatsapp/session`
 - API session creation: `http://localhost:3000/whatsapp/sessions`
@@ -127,7 +127,7 @@ Typical local flow:
   docker compose -f compose.dev.yaml up --build
   ```
 
-2. Open `http://localhost/login` to create and pair a session, or `http://localhost` if you already have a session id.
+2. Open `http://localhost/session/main` to create and pair a session, or `http://localhost` if you already have a session id.
 
 3. Wait for the session panel to show a QR code, then scan it with WhatsApp on your phone.
 

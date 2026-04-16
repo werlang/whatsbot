@@ -25,13 +25,13 @@
                 <div class="panel__header">
                     <div>
                         <h2 id="login-title">Create session</h2>
-                        <p>Generate one session id, then pair it by scanning the QR code from your phone.</p>
+                        <p>Generate one session id, copy it as the password, then pair it by scanning the QR code from your phone.</p>
                     </div>
                 </div>
 
                 <div class="feedback" id="login-feedback" data-role="login-feedback" hidden aria-live="polite"></div>
 
-                <p class="form__hint">Refreshing this page with the same <code>sessionId</code> query parameter reopens the same session view.</p>
+                <p class="form__hint">Refreshing this page with the same session path reopens the same session view.</p>
                 <p class="form__hint form__hint--muted" data-role="session-id-panel" hidden>Active session: <strong data-role="session-id">-</strong></p>
 
                 <button class="button" id="create-session-button" type="button">Create WhatsApp session</button>
@@ -66,6 +66,21 @@
                 <p class="session-card__meta">API base URL: <code>{{apiUrl}}</code></p>
             </aside>
         </div>
+
+        <dialog class="session-secret-modal" id="session-secret-dialog" aria-labelledby="session-secret-title">
+            <div class="session-secret-modal__card">
+                <p class="session-secret-modal__eyebrow">Session password</p>
+                <h2 class="session-secret-modal__title" id="session-secret-title">Copy the UUID now</h2>
+                <p class="session-secret-modal__body">This UUID is the password for the session you just created. Copy it before closing this dialog.</p>
+                <code class="session-secret-modal__value" data-role="session-secret-value"></code>
+                <p class="session-secret-modal__status" data-role="session-secret-status" hidden aria-live="polite"></p>
+                <div class="session-secret-modal__actions">
+                    <button class="button" data-role="session-secret-copy" type="button">Copy UUID</button>
+                    <button class="button button--secondary" data-role="session-secret-send-now" type="button">Send now</button>
+                    <button class="button button--secondary" data-role="session-secret-close" type="button">I copied it</button>
+                </div>
+            </div>
+        </dialog>
 
         <p class="footer-note">&copy; <span data-role="year">{{year}}</span> {{siteName}}</p>
     </main>

@@ -23,10 +23,10 @@
 - `whatsapp-web.js` is unofficial and depends on QR pairing plus Chromium in Docker; do not describe it like an official WhatsApp Business API integration.
 
 ## Web rules
-- The web service is an SSR Mustache app with a scheduler page at `/`, a dedicated login/pairing page at `/login`, and readiness JSON at `/ready`.
+- The web service is an SSR Mustache app with a scheduler page at `/`, a dedicated login/pairing page at `/session/:id` (with `/login` redirecting to `/session/main`), and readiness JSON at `/ready`.
 - Browser behavior lives in plain modules under `web/public/js/`.
 - Keep the current pattern of server-rendered HTML plus lightweight browser helpers.
-- The scheduler page posts directly to the API and polls live session state for QR/readiness updates. The login page creates one WhatsApp session and monitors its pairing state.
+- The scheduler page posts directly to the API and polls live session state for QR/readiness updates. The login page creates one WhatsApp session, shows the UUID/password in a modal, and monitors its pairing state.
 
 ## Testing and tooling
 - Both services currently use the **Node test runner** via `node --test`, exposed as `npm test`.

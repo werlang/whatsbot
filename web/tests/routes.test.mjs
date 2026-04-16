@@ -21,12 +21,29 @@ async function stopTestServer(server) {
     });
 }
 
-test("GET / renders the scheduler UI shell", async () => {
+test("GET / renders the routing gateway", async () => {
     const server = await startTestServer();
     const { port } = server.address();
 
     try {
         const response = await fetch("http://127.0.0.1:" + port + "/");
+        const body = await response.text();
+
+        assert.equal(response.status, 200);
+        assert.match(body, /Routing session/);
+        assert.match(body, /js\/root\.js/);
+        assert.match(body, /Open \/login/);
+    } finally {
+        await stopTestServer(server);
+    }
+});
+
+test("GET /session/main renders the scheduler UI shell", async () => {
+    const server = await startTestServer();
+    const { port } = server.address();
+
+    try {
+        const response = await fetch("http://127.0.0.1:" + port + "/session/main");
         const body = await response.text();
 
         assert.equal(response.status, 200);
@@ -55,6 +72,8 @@ test("GET /login renders the session pairing flow", async () => {
         assert.equal(response.status, 200);
         assert.match(body, /Create one WhatsApp app session\./);
         assert.match(body, /id="create-session-button"/);
+        assert.match(body, /id="session-secret-dialog"/);
+        assert.match(body, /data-role="session-secret-send-now"/);
         assert.match(body, /Pairing status/);
         assert.match(body, /id="session-status"/);
     } finally {
