@@ -56,3 +56,24 @@ test('createAppConfig reads API host and port overrides from the environment', (
     assert.equal(runtimeConfig.host, '127.0.0.1');
     assert.equal(runtimeConfig.port, 4321);
 });
+
+test('createAppConfig falls back to the default API port when the environment value is invalid', () => {
+    const runtimeConfig = createAppConfig({
+        API_PORT: 'not-a-number',
+    });
+
+    assert.equal(runtimeConfig.host, '0.0.0.0');
+    assert.equal(runtimeConfig.port, 3000);
+});
+
+test('createAppConfig falls back to the default API port when the numeric value is out of range', () => {
+    const negativePortConfig = createAppConfig({
+        API_PORT: '-1',
+    });
+    const oversizedPortConfig = createAppConfig({
+        API_PORT: '70000',
+    });
+
+    assert.equal(negativePortConfig.port, 3000);
+    assert.equal(oversizedPortConfig.port, 3000);
+});

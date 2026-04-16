@@ -17,12 +17,25 @@ function readInteger(value, fallback) {
 }
 
 /**
+ * Reads one port environment variable with a fallback value.
+ */
+function readPort(value, fallback) {
+    const parsedValue = readInteger(value, fallback);
+
+    if (parsedValue < 0 || parsedValue > 65535) {
+        return fallback;
+    }
+
+    return parsedValue;
+}
+
+/**
  * Builds the runtime configuration used by the API service.
  */
 function createAppConfig(env = process.env) {
     return {
-        host: '0.0.0.0',
-        port: readInteger(3000),
+        host: env.API_HOST || '0.0.0.0',
+        port: readPort(env.API_PORT, 3000),
         mysql: {
             database: env.MYSQL_DATABASE || 'whatsbot',
         },
@@ -42,4 +55,4 @@ function createAppConfig(env = process.env) {
 
 const appConfig = createAppConfig();
 
-export { appConfig, createAppConfig, readInteger, readList };
+export { appConfig, createAppConfig, readInteger, readList, readPort };

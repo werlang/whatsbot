@@ -87,3 +87,21 @@ test("GET /login renders the session pairing flow", async () => {
         await stopTestServer(server);
     }
 });
+
+test("GET /session/:id keeps hostile session ids inside escaped template JSON", async () => {
+    const server = await startTestServer();
+    const { port } = server.address();
+    const sessionId = "</script><script>alert(1)</script>";
+
+    try {
+        const response = await fetch(`http://127.0.0.1:${port}/session/${encodeURIComponent(sessionId)}`);
+        const body = await response.text();
+
+        assert.equal(response.status, 200);
+        assert.match(body, /<script id="template-vars" type="application\/json">/);
+        assert.doesNotMatch(body, /<script id="template-vars" type="application\/json">[\s\S]*<\/script><script>alert\(1\)<\/script>/);
+        assert.match(body, /\\u003c\/script\\u003e\\u003cscript\\u003ealert\(1\)\\u003c\/script\\u003e/);
+    } finally {
+        await stopTestServer(server);
+    }
+});
