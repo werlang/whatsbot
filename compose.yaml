@@ -9,7 +9,9 @@ services:
         depends_on:
             - mysql
         volumes:
+            - ./api:/app
             - whatsapp_auth:/whatsapp/auth
+            - node_modules_api:/app/node_modules
         networks:
             - whatsbot
             - default
@@ -20,6 +22,9 @@ services:
         working_dir: /app
         env_file:
             - .env
+        volumes:
+            - ./web:/app
+            - node_modules_web:/app/node_modules
         command: npm run production
         depends_on:
             - api
@@ -39,8 +44,9 @@ services:
 volumes:
     mysql:
     whatsapp_auth:
+    node_modules_api:
+    node_modules_web:
 networks:
     whatsbot:
         name: whatsbot
     default:
-        name: default
