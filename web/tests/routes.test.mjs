@@ -32,6 +32,7 @@ test("GET / renders the scheduler UI shell", async () => {
         assert.equal(response.status, 200);
         assert.match(body, /Schedule one WhatsApp message\./);
         assert.match(body, /id="schedule-form"/);
+        assert.match(body, /id="recipient-picker"/);
         assert.match(body, /id="phone-number"/);
         assert.match(body, /id="message"/);
         assert.match(body, /id="scheduled-for"/);

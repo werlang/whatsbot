@@ -16,6 +16,7 @@ body {
 }
 
 input,
+select,
 textarea,
 button {
     font: inherit;
@@ -104,6 +105,7 @@ button {
 }
 
 .form__field input,
+.form__field select,
 .form__field textarea {
     width: 100%;
     padding: 0.9rem 1rem;
@@ -114,6 +116,7 @@ button {
 }
 
 .form__field input:focus,
+.form__field select:focus,
 .form__field textarea:focus {
     outline: 2px solid rgba(37, 85, 217, 0.18);
     border-color: #2555d9;

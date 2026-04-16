@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { Model } from "./model.js";
-import { normalizePhoneNumber } from "../helpers/phone-number.js";
+import { normalizeMessageTarget } from "../helpers/message-target.js";
 
 /**
  * Persists one scheduled WhatsApp message and its delivery lifecycle.
@@ -10,6 +10,8 @@ class ScheduledMessage extends Model {
     static view = [
         "id",
         "session_id",
+        "target_type",
+        "target_value",
         "phone_number",
         "message",
         "scheduled_for",
@@ -37,6 +39,8 @@ class ScheduledMessage extends Model {
     constructor({
         id,
         sessionId,
+        targetType,
+        targetValue,
         phoneNumber,
         message,
         scheduledFor,
@@ -52,9 +56,13 @@ class ScheduledMessage extends Model {
         updatedAt,
     } = {}) {
         super();
+        const messageTarget = normalizeMessageTarget({ targetType, targetValue, phoneNumber });
+
         this.id = id || crypto.randomUUID();
         this.sessionId = String(sessionId || "main").trim() || "main";
-        this.phoneNumber = normalizePhoneNumber(phoneNumber);
+        this.targetType = messageTarget.targetType;
+        this.targetValue = messageTarget.targetValue;
+        this.phoneNumber = messageTarget.phoneNumber;
         this.message = String(message ?? "").trim();
         this.scheduledFor = new Date(scheduledFor).toISOString();
         this.status = ScheduledMessage.normalizeStatus(status);
@@ -76,6 +84,8 @@ class ScheduledMessage extends Model {
         return {
             id: this.id,
             sessionId: this.sessionId,
+            targetType: this.targetType,
+            targetValue: this.targetValue,
             phoneNumber: this.phoneNumber,
             message: this.message,
             scheduledFor: this.scheduledFor,
@@ -110,10 +120,18 @@ class ScheduledMessage extends Model {
             return null;
         }
 
+        const messageTarget = normalizeMessageTarget({
+            targetType: row.targetType || row.target_type,
+            targetValue: row.targetValue || row.target_value,
+            phoneNumber: row.phoneNumber || row.phone_number,
+        });
+
         return {
             id: row.id,
             sessionId: row.sessionId || row.session_id || "main",
-            phoneNumber: normalizePhoneNumber(row.phoneNumber || row.phone_number),
+            targetType: messageTarget.targetType,
+            targetValue: messageTarget.targetValue,
+            phoneNumber: messageTarget.phoneNumber,
             message: row.message,
             scheduledFor: row.scheduledFor || row.scheduled_for
                 ? new Date(row.scheduledFor || row.scheduled_for).toISOString()
@@ -152,6 +170,8 @@ class ScheduledMessage extends Model {
         return {
             id: scheduledMessage.id,
             session_id: scheduledMessage.sessionId,
+            target_type: scheduledMessage.targetType,
+            target_value: scheduledMessage.targetValue,
             phone_number: scheduledMessage.phoneNumber,
             message: scheduledMessage.message,
             scheduled_for: this.driver.toDateTime(scheduledMessage.scheduledFor),

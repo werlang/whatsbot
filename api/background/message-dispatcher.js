@@ -97,7 +97,11 @@ class MessageDispatcher {
         try {
             const result = await this.whatsappClient.sendMessage(
                 scheduledMessage.sessionId,
-                scheduledMessage.phoneNumber,
+                {
+                    targetType: scheduledMessage.targetType,
+                    targetValue: scheduledMessage.targetValue,
+                    phoneNumber: scheduledMessage.phoneNumber,
+                },
                 scheduledMessage.message,
             );
             await this.scheduledMessageModel.markSent(scheduledMessage.id, {

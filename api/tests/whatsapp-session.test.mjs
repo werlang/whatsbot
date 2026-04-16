@@ -41,6 +41,11 @@ test("GET /whatsapp/session returns the stable session envelope", async () => {
                     message: "Booting",
                 },
                 clientInfo: null,
+                chatDirectory: {
+                    contacts: [],
+                    groups: [],
+                    refreshedAt: null,
+                },
                 lastError: null,
                 lastEventAt: "2026-04-15T12:00:00.000Z",
                 disconnectReason: null,
@@ -72,6 +77,11 @@ test("GET /whatsapp/session returns the stable session envelope", async () => {
         assert.equal(payload.data.session.hasQrCode, true);
         assert.match(payload.data.session.qrCodeDataUrl, /^data:image\/png;base64,/);
         assert.equal(payload.data.session.loading.percent, 42);
+        assert.deepEqual(payload.data.session.chatDirectory, {
+            contacts: [],
+            groups: [],
+            refreshedAt: null,
+        });
     } finally {
         await stopTestServer(server);
     }
@@ -227,6 +237,93 @@ test("WhatsAppClientManager retries send after syncing a missing LID contact", a
     assert.equal(result.whatsappMessageId, "wamid-2");
 });
 
+test("WhatsAppClientManager sends group messages directly to the provided group chat id", async () => {
+    const manager = new WhatsAppClientManager({
+        clientId: "main",
+        authPath: "/tmp/whatsapp-auth",
+        executablePath: "/usr/bin/chromium-browser",
+        puppeteerArgs: [],
+    });
+
+    manager.state.ready = true;
+    let sentPayload = null;
+    manager.client = {
+        async sendMessage(chatId, message) {
+            sentPayload = { chatId, message };
+            return {
+                id: { _serialized: "wamid-group-1" },
+                timestamp: 1776254400,
+            };
+        },
+    };
+
+    const result = await manager.sendMessage({
+        targetType: "group",
+        targetValue: "120363043210123456@g.us",
+    }, "hello group");
+
+    assert.deepEqual(sentPayload, {
+        chatId: "120363043210123456@g.us",
+        message: "hello group",
+    });
+    assert.equal(result.chatId, "120363043210123456@g.us");
+    assert.equal(result.phoneNumber, null);
+    assert.equal(result.targetType, "group");
+});
+
+test("WhatsAppClientManager reads contacts and groups from the WhatsApp chat list", async () => {
+    const manager = new WhatsAppClientManager({
+        clientId: "main",
+        authPath: "/tmp/whatsapp-auth",
+        executablePath: "/usr/bin/chromium-browser",
+        puppeteerArgs: [],
+    });
+
+    manager.state.ready = true;
+    manager.client = {
+        async getChats() {
+            return [
+                {
+                    id: {
+                        _serialized: "5551999999999@c.us",
+                        user: "5551999999999",
+                    },
+                    isGroup: false,
+                    name: "Alice",
+                    contact: {
+                        number: "5551999999999",
+                    },
+                },
+                {
+                    id: {
+                        _serialized: "120363043210123456@g.us",
+                    },
+                    isGroup: true,
+                    name: "Launch Team",
+                },
+            ];
+        },
+    };
+
+    const directory = await manager.refreshChatDirectory({ force: true });
+
+    assert.deepEqual(directory.contacts, [{
+        targetType: "contact",
+        targetValue: "5551999999999",
+        phoneNumber: "5551999999999",
+        chatId: "5551999999999@c.us",
+        label: "Alice",
+    }]);
+    assert.deepEqual(directory.groups, [{
+        targetType: "group",
+        targetValue: "120363043210123456@g.us",
+        phoneNumber: null,
+        chatId: "120363043210123456@g.us",
+        label: "Launch Team",
+    }]);
+    assert.match(directory.refreshedAt, /^2026|^20/);
+});
+
 test("WhatsAppClientManager retries Brazil mobile numbers with and without the ninth digit", async () => {
     const manager = new WhatsAppClientManager({
         clientId: "main",
@@ -292,6 +389,11 @@ test("POST /whatsapp/sessions creates a new session envelope", async () => {
                     message: null,
                 },
                 clientInfo: null,
+                chatDirectory: {
+                    contacts: [],
+                    groups: [],
+                    refreshedAt: null,
+                },
                 lastError: null,
                 lastEventAt: null,
                 disconnectReason: null,
@@ -322,6 +424,11 @@ test("POST /whatsapp/sessions creates a new session envelope", async () => {
                     message: null,
                 },
                 clientInfo: null,
+                chatDirectory: {
+                    contacts: [],
+                    groups: [],
+                    refreshedAt: null,
+                },
                 lastError: null,
                 lastEventAt: null,
                 disconnectReason: null,

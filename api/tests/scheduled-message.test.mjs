@@ -33,6 +33,9 @@ test("ScheduledMessage.claimDue reclaims stale processing rows without touching 
 
             return [{
                 id: "pending-1",
+                session_id: "main",
+                target_type: "contact",
+                target_value: "5551999999999",
                 phone_number: "5551999999999",
                 message: "hello world",
                 scheduled_for: "2026-04-15 11:45:00",
@@ -48,6 +51,9 @@ test("ScheduledMessage.claimDue reclaims stale processing rows without touching 
                 updated_at: "2026-04-15 12:00:00",
             }, {
                 id: "stale-1",
+                session_id: "main",
+                target_type: "contact",
+                target_value: "5551888888888",
                 phone_number: "5551888888888",
                 message: "reclaimed",
                 scheduled_for: "2026-04-15 11:30:00",
@@ -75,6 +81,7 @@ test("ScheduledMessage.claimDue reclaims stale processing rows without touching 
             limit: 2,
             claimToken: "claim-1",
             reclaimAfterMs: 10 * 60 * 1000,
+            sessionIds: ["main"],
         });
 
         assert.equal(claimedMessages.length, 2);
@@ -84,10 +91,11 @@ test("ScheduledMessage.claimDue reclaims stale processing rows without touching 
         assert.deepEqual(findCalls[0], {
             table: ScheduledMessage.table,
             filter: {
+                session_id: ["main"],
                 scheduled_for: { "<=": "2026-04-15 12:00:00" },
                 status: ScheduledMessage.STATUS_PENDING,
             },
-            view: ["id", "scheduled_for", "status", "claimed_at"],
+            view: ["id", "session_id", "scheduled_for", "status", "claimed_at"],
             opt: {
                 order: { scheduled_for: 1 },
                 limit: 2,
@@ -97,11 +105,12 @@ test("ScheduledMessage.claimDue reclaims stale processing rows without touching 
         assert.deepEqual(findCalls[1], {
             table: ScheduledMessage.table,
             filter: {
+                session_id: ["main"],
                 scheduled_for: { "<=": "2026-04-15 12:00:00" },
                 status: ScheduledMessage.STATUS_PROCESSING,
                 claimed_at: { "<=": "2026-04-15 11:50:00" },
             },
-            view: ["id", "scheduled_for", "status", "claimed_at"],
+            view: ["id", "session_id", "scheduled_for", "status", "claimed_at"],
             opt: {
                 order: { scheduled_for: 1 },
                 limit: 2,

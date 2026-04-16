@@ -26,16 +26,25 @@
                 <div class="panel__header">
                     <div>
                         <h2 id="scheduler-title">Schedule message</h2>
-                        <p>Queue one WhatsApp message for a specific local date and time.</p>
+                        <p>Queue one WhatsApp message for a specific local date and time, either by typing a number or picking a synced contact or group.</p>
                     </div>
                 </div>
 
                 <div class="feedback" id="form-feedback" data-role="form-feedback" hidden aria-live="polite"></div>
 
                 <form class="form" id="schedule-form">
+                    <label class="form__field" for="recipient-picker">
+                        <span>Pick contact or group</span>
+                        <select id="recipient-picker" name="recipient">
+                            <option value="">Pair this session to load contacts and groups.</option>
+                        </select>
+                    </label>
+
+                    <p class="form__hint" id="recipient-directory-status">Pair this session to load your WhatsApp contacts and groups. You can still type a number manually.</p>
+
                     <label class="form__field" for="phone-number">
                         <span>Phone number</span>
-                        <input id="phone-number" name="phoneNumber" type="tel" autocomplete="tel" inputmode="tel" placeholder="5551999999999" required>
+                        <input id="phone-number" name="phoneNumber" type="tel" autocomplete="tel" inputmode="tel" placeholder="5551999999999">
                     </label>
 
                     <label class="form__field" for="message">
@@ -49,7 +58,7 @@
                     </label>
 
                     <p class="form__hint">Timezone used for scheduling: <strong data-role="timezone-label">Loading timezone…</strong></p>
-                    <p class="form__hint form__hint--muted">Messages can still be queued even while the WhatsApp session is waiting for pairing.</p>
+                    <p class="form__hint form__hint--muted">Messages can still be queued even while the WhatsApp session is waiting for pairing. Group messages require picking a synced group above.</p>
 
                     <button class="button" id="schedule-submit" type="submit">Schedule message</button>
                 </form>

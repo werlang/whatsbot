@@ -84,6 +84,11 @@ class WhatsAppSessionManager {
     async getSessionState(sessionId = this.getDefaultSessionId()) {
         const normalizedSessionId = normalizeSessionId(sessionId);
         const session = await this.ensureSession(normalizedSessionId);
+
+        if (session.isReady()) {
+            await session.refreshChatDirectory();
+        }
+
         return this.describeSession(normalizedSessionId, session);
     }
 
@@ -138,10 +143,10 @@ class WhatsAppSessionManager {
     /**
      * Sends one message through the requested WhatsApp session.
      */
-    async sendMessage(sessionId, phoneNumber, message) {
+    async sendMessage(sessionId, target, message) {
         const normalizedSessionId = normalizeSessionId(sessionId);
         const session = await this.ensureSession(normalizedSessionId);
-        return await session.sendMessage(phoneNumber, message);
+        return await session.sendMessage(target, message);
     }
 
     /**

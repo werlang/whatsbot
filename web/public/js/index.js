@@ -7,6 +7,11 @@ import {
     getCurrentTimezoneLabel,
     toDateTimeLocalValue,
 } from "./helpers/datetime.js";
+import {
+    buildRecipientChoiceValue,
+    readRecipientDirectory,
+    resolveScheduledMessageTarget,
+} from "./helpers/recipient.js";
 import { describeSession } from "./helpers/session.js";
 import { resolveActiveSessionId } from "./helpers/session-id.js";
 
@@ -18,6 +23,8 @@ const SESSION_REFRESH_INTERVAL_MS = 15000;
 function createElements() {
     return {
         form: document.querySelector("#schedule-form"),
+        recipientPicker: document.querySelector("#recipient-picker"),
+        recipientDirectoryStatus: document.querySelector("#recipient-directory-status"),
         phoneNumber: document.querySelector("#phone-number"),
         message: document.querySelector("#message"),
         scheduledFor: document.querySelector("#scheduled-for"),
@@ -59,6 +66,80 @@ function readResponseMessage(response, fallbackMessage) {
         : "";
 
     return message || fallbackMessage;
+}
+
+/**
+ * Renders the latest synced contacts and groups into the recipient picker.
+ */
+function renderRecipientDirectory(elements, session) {
+    if (!elements.recipientPicker) {
+        return;
+    }
+
+    const directory = readRecipientDirectory(session);
+    const previousValue = elements.recipientPicker.value;
+    const totalRecipients = directory.contacts.length + directory.groups.length;
+
+    elements.recipientPicker.replaceChildren();
+
+    const placeholderOption = document.createElement("option");
+    placeholderOption.value = "";
+    placeholderOption.textContent = totalRecipients > 0
+        ? "Type a number or pick a synced chat"
+        : (session?.ready
+            ? "No synced contacts or groups found yet"
+            : "Pair this session to load contacts and groups");
+    elements.recipientPicker.append(placeholderOption);
+
+    appendRecipientGroup(elements.recipientPicker, "Contacts", directory.contacts);
+    appendRecipientGroup(elements.recipientPicker, "Groups", directory.groups);
+
+    elements.recipientPicker.disabled = totalRecipients === 0;
+
+    if ([...elements.recipientPicker.options].some(option => option.value === previousValue)) {
+        elements.recipientPicker.value = previousValue;
+    }
+
+    if (!elements.recipientDirectoryStatus) {
+        return;
+    }
+
+    if (!session?.ready) {
+        elements.recipientDirectoryStatus.textContent = "Pair this session to load your WhatsApp contacts and groups. You can still type a number manually.";
+        return;
+    }
+
+    if (totalRecipients === 0) {
+        elements.recipientDirectoryStatus.textContent = "No synced contacts or groups were found yet. You can still type a number manually.";
+        return;
+    }
+
+    const contactsLabel = `${directory.contacts.length} contact${directory.contacts.length === 1 ? "" : "s"}`;
+    const groupsLabel = `${directory.groups.length} group${directory.groups.length === 1 ? "" : "s"}`;
+    elements.recipientDirectoryStatus.textContent = `Synced ${contactsLabel} and ${groupsLabel}. Pick one here or type a number below.`;
+}
+
+/**
+ * Appends one optgroup of recipient options when entries are available.
+ */
+function appendRecipientGroup(select, label, entries) {
+    if (!select || !Array.isArray(entries) || entries.length === 0) {
+        return;
+    }
+
+    const group = document.createElement("optgroup");
+    group.label = label;
+
+    for (const entry of entries) {
+        const option = document.createElement("option");
+        option.value = buildRecipientChoiceValue(entry);
+        option.textContent = entry.phoneNumber
+            ? `${entry.label} · ${entry.phoneNumber}`
+            : entry.label;
+        group.append(option);
+    }
+
+    select.append(group);
 }
 
 /**
@@ -137,10 +218,12 @@ async function loadSessionState(elements, sessionId) {
             showQr: false,
             qrCodeDataUrl: "",
         });
+        renderRecipientDirectory(elements, null);
         return;
     }
 
     renderSessionState(elements, describeSession(response.data.session));
+    renderRecipientDirectory(elements, response.data.session);
 }
 
 /**
@@ -157,11 +240,15 @@ async function submitSchedule(event, elements, sessionId) {
     elements.submitButton.disabled = true;
 
     try {
+        const targetPayload = resolveScheduledMessageTarget({
+            selectedRecipientValue: elements.recipientPicker?.value,
+            phoneNumber: elements.phoneNumber?.value,
+        });
         const response = await requestApi("/messages", {
             method: "POST",
             body: {
                 sessionId,
-                phoneNumber: elements.phoneNumber?.value.trim(),
+                ...targetPayload,
                 message: elements.message?.value.trim(),
                 scheduledFor: convertDateTimeLocalToOffsetIso(elements.scheduledFor?.value),
             },

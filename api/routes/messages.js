@@ -1,7 +1,7 @@
 import express from "express";
 import { normalizeScheduledFor } from "../helpers/date.js";
 import { HttpError } from "../helpers/error.js";
-import { normalizePhoneNumber } from "../helpers/phone-number.js";
+import { normalizeMessageTarget } from "../helpers/message-target.js";
 import { sendCreated } from "../helpers/response.js";
 import { normalizeSessionId } from "../helpers/session.js";
 import { ScheduledMessage } from "../model/scheduled-message.js";
@@ -11,7 +11,7 @@ import { ScheduledMessage } from "../model/scheduled-message.js";
  */
 function parseScheduledMessagePayload(payload = {}) {
     const sessionId = normalizeSessionId(payload.sessionId, { fallback: "main" });
-    const phoneNumber = normalizePhoneNumber(payload.phoneNumber);
+    const messageTarget = normalizeMessageTarget(payload);
     const message = String(payload.message ?? "").trim();
 
     if (!message) {
@@ -20,7 +20,7 @@ function parseScheduledMessagePayload(payload = {}) {
 
     return {
         sessionId,
-        phoneNumber,
+        ...messageTarget,
         message,
         scheduledFor: normalizeScheduledFor(payload.scheduledFor),
     };

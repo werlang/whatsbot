@@ -1,7 +1,9 @@
 CREATE TABLE IF NOT EXISTS scheduled_messages (
     id CHAR(36) NOT NULL PRIMARY KEY,
     session_id VARCHAR(64) NOT NULL DEFAULT 'main',
-    phone_number VARCHAR(32) NOT NULL,
+    target_type ENUM("contact", "group") NOT NULL DEFAULT "contact",
+    target_value VARCHAR(128) NOT NULL,
+    phone_number VARCHAR(32) DEFAULT NULL,
     message TEXT NOT NULL,
     scheduled_for DATETIME NOT NULL,
     status ENUM("pending", "processing", "sent", "failed") NOT NULL DEFAULT "pending",
@@ -14,6 +16,7 @@ CREATE TABLE IF NOT EXISTS scheduled_messages (
     error_message TEXT DEFAULT NULL,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
+    INDEX idx_scheduled_messages_target (session_id, target_type, target_value),
     INDEX idx_scheduled_messages_due (status, scheduled_for),
     INDEX idx_scheduled_messages_claim_token (claim_token)
 );

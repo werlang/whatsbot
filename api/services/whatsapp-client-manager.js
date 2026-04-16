@@ -3,6 +3,7 @@ import path from "node:path";
 import QRCode from "qrcode";
 import WhatsAppWeb from "whatsapp-web.js";
 import { appConfig } from '../config/app-config.js';
+import { CONTACT_TARGET_TYPE, GROUP_TARGET_TYPE, normalizeMessageTarget } from "../helpers/message-target.js";
 import { normalizePhoneNumber, toWhatsAppChatId } from "../helpers/phone-number.js";
 import { isWhatsBotCommand } from "./whatsapp-command.js";
 
@@ -14,6 +15,7 @@ const CHROMIUM_SINGLETON_ARTIFACTS = [
 ];
 
 const BRAZIL_COUNTRY_CODE = "55";
+const CHAT_DIRECTORY_TTL_MS = 60 * 1000;
 
 /**
  * Manages the single whatsapp-web.js client used by the API runtime.
@@ -32,6 +34,7 @@ class WhatsAppClientManager {
         this.buildSelfCommandErrorReply = buildSelfCommandErrorReply;
         this.client = null;
         this.initializingPromise = null;
+        this.chatDirectoryRefreshPromise = null;
         this.state = {
             clientId: config.clientId,
             status: "idle",
@@ -46,6 +49,7 @@ class WhatsAppClientManager {
                 message: null,
             },
             clientInfo: null,
+            chatDirectory: this.createEmptyChatDirectory(),
             lastError: null,
             lastEventAt: null,
             disconnectReason: null,
@@ -153,6 +157,7 @@ class WhatsAppClientManager {
                 hasQrCode: false,
                 qrCodeDataUrl: null,
                 qrCodeUpdatedAt: null,
+                chatDirectory: this.createEmptyChatDirectory(),
                 lastError: null,
             });
         });
@@ -166,7 +171,12 @@ class WhatsAppClientManager {
                 qrCodeDataUrl: null,
                 qrCodeUpdatedAt: null,
                 clientInfo: this.readClientInfo(),
+                chatDirectory: this.createEmptyChatDirectory(),
                 lastError: null,
+            });
+
+            this.refreshChatDirectory({ force: true }).catch(error => {
+                this.logger.error(`Failed to refresh WhatsApp chat directory for session ${this.config.clientId}:`, error);
             });
         });
 
@@ -179,6 +189,7 @@ class WhatsAppClientManager {
                 qrCodeDataUrl: null,
                 qrCodeUpdatedAt: null,
                 clientInfo: null,
+                chatDirectory: this.createEmptyChatDirectory(),
                 lastError: {
                     message: String(message || "WhatsApp authentication failed."),
                     at: new Date().toISOString(),
@@ -195,6 +206,7 @@ class WhatsAppClientManager {
                 qrCodeDataUrl: null,
                 qrCodeUpdatedAt: null,
                 clientInfo: null,
+                chatDirectory: this.createEmptyChatDirectory(),
                 disconnectReason: String(reason || "unknown"),
             });
         });
@@ -303,8 +315,37 @@ class WhatsAppClientManager {
             ...this.state,
             loading: { ...this.state.loading },
             clientInfo: this.state.clientInfo ? { ...this.state.clientInfo } : null,
+            chatDirectory: this.cloneChatDirectory(this.state.chatDirectory),
             lastError: this.state.lastError ? { ...this.state.lastError } : null,
         };
+    }
+
+    /**
+     * Refreshes the cached contact and group directory when the client is ready.
+     */
+    async refreshChatDirectory({ force = false } = {}) {
+        if (!this.client || !this.isReady()) {
+            return this.cloneChatDirectory(this.state.chatDirectory);
+        }
+
+        if (!force && !this.shouldRefreshChatDirectory(this.state.chatDirectory)) {
+            return this.cloneChatDirectory(this.state.chatDirectory);
+        }
+
+        if (this.chatDirectoryRefreshPromise) {
+            return await this.chatDirectoryRefreshPromise;
+        }
+
+        this.chatDirectoryRefreshPromise = this.readChatDirectory()
+            .then(chatDirectory => {
+                this.updateState({ chatDirectory });
+                return this.cloneChatDirectory(chatDirectory);
+            })
+            .finally(() => {
+                this.chatDirectoryRefreshPromise = null;
+            });
+
+        return await this.chatDirectoryRefreshPromise;
     }
 
     /**
@@ -317,8 +358,12 @@ class WhatsAppClientManager {
     /**
      * Sends one WhatsApp message through the managed client.
      */
-    async sendMessage(phoneNumber, message) {
-        const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+    async sendMessage(target, message) {
+        const normalizedTarget = normalizeMessageTarget(
+            typeof target === "string"
+                ? { phoneNumber: target }
+                : target,
+        );
         const normalizedMessage = String(message ?? "").trim();
 
         if (!normalizedMessage) {
@@ -329,13 +374,15 @@ class WhatsAppClientManager {
             throw new Error("WhatsApp client is not ready to send messages.");
         }
 
-        let chatId = await this.resolveWhatsAppChatId(normalizedPhoneNumber);
+        let chatId = normalizedTarget.targetType === GROUP_TARGET_TYPE
+            ? normalizedTarget.targetValue
+            : await this.resolveWhatsAppChatId(normalizedTarget.phoneNumber);
         let sentMessage;
 
         try {
             sentMessage = await this.client.sendMessage(chatId, normalizedMessage);
         } catch (error) {
-            if (!this.isMissingLidError(error)) {
+            if (normalizedTarget.targetType !== CONTACT_TARGET_TYPE || !this.isMissingLidError(error)) {
                 throw error;
             }
 
@@ -345,7 +392,9 @@ class WhatsAppClientManager {
 
         return {
             chatId,
-            phoneNumber: normalizedPhoneNumber,
+            phoneNumber: normalizedTarget.phoneNumber,
+            targetType: normalizedTarget.targetType,
+            targetValue: normalizedTarget.targetValue,
             whatsappMessageId: sentMessage?.id?._serialized || null,
             sentAt: sentMessage?.timestamp
                 ? new Date(sentMessage.timestamp * 1000).toISOString()
@@ -445,6 +494,162 @@ class WhatsAppClientManager {
     }
 
     /**
+     * Returns true when the cached chat directory should be refreshed.
+     */
+    shouldRefreshChatDirectory(chatDirectory = this.state.chatDirectory) {
+        const refreshedAt = Date.parse(chatDirectory?.refreshedAt || "");
+
+        if (!Number.isFinite(refreshedAt)) {
+            return true;
+        }
+
+        return (Date.now() - refreshedAt) >= CHAT_DIRECTORY_TTL_MS;
+    }
+
+    /**
+     * Builds the latest cached contact and group directory from WhatsApp chats.
+     */
+    async readChatDirectory() {
+        const chats = await this.client.getChats();
+        const contacts = [];
+        const groups = [];
+
+        for (const chat of chats) {
+            const directoryEntry = this.readDirectoryEntry(chat);
+
+            if (!directoryEntry) {
+                continue;
+            }
+
+            if (directoryEntry.targetType === GROUP_TARGET_TYPE) {
+                groups.push(directoryEntry);
+                continue;
+            }
+
+            contacts.push(directoryEntry);
+        }
+
+        const sortEntries = (left, right) => left.label.localeCompare(right.label);
+
+        contacts.sort(sortEntries);
+        groups.sort(sortEntries);
+
+        return {
+            contacts,
+            groups,
+            refreshedAt: new Date().toISOString(),
+        };
+    }
+
+    /**
+     * Normalizes one WhatsApp chat into one directory entry.
+     */
+    readDirectoryEntry(chat) {
+        const chatId = chat?.id?._serialized || null;
+
+        if (!chatId || chatId.endsWith("@broadcast") || chatId === "status@broadcast") {
+            return null;
+        }
+
+        if (chat.isGroup || chatId.endsWith("@g.us")) {
+            return this.readGroupDirectoryEntry(chat, chatId);
+        }
+
+        return this.readContactDirectoryEntry(chat, chatId);
+    }
+
+    /**
+     * Normalizes one contact chat into a directory entry.
+     */
+    readContactDirectoryEntry(chat, chatId) {
+        const phoneNumber = this.readDirectoryPhoneNumber(chat, chatId);
+
+        if (!phoneNumber) {
+            return null;
+        }
+
+        return {
+            targetType: CONTACT_TARGET_TYPE,
+            targetValue: phoneNumber,
+            phoneNumber,
+            chatId,
+            label: this.readDirectoryLabel(chat, phoneNumber),
+        };
+    }
+
+    /**
+     * Normalizes one group chat into a directory entry.
+     */
+    readGroupDirectoryEntry(chat, chatId) {
+        return {
+            targetType: GROUP_TARGET_TYPE,
+            targetValue: chatId,
+            phoneNumber: null,
+            chatId,
+            label: this.readDirectoryLabel(chat, chat?.name || chatId),
+        };
+    }
+
+    /**
+     * Reads the best directory label available for one chat.
+     */
+    readDirectoryLabel(chat, fallbackLabel) {
+        const candidate = [
+            chat?.name,
+            chat?.formattedTitle,
+            chat?.contact?.name,
+            chat?.contact?.pushname,
+            chat?.contact?.shortName,
+            fallbackLabel,
+        ].find(value => typeof value === "string" && value.trim());
+
+        return String(candidate || fallbackLabel || "Unknown").trim();
+    }
+
+    /**
+     * Reads a normalized phone number from one contact chat.
+     */
+    readDirectoryPhoneNumber(chat, chatId) {
+        const candidates = [
+            chat?.contact?.number,
+            chat?.id?.user,
+            typeof chatId === "string" ? chatId.replace(/@c\.us$/i, "") : null,
+        ];
+
+        for (const candidate of candidates) {
+            const digits = String(candidate ?? "").replace(/\D/g, "");
+
+            if (digits.length >= 10 && digits.length <= 15) {
+                return digits;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Builds an empty directory snapshot for sessions without synced chats yet.
+     */
+    createEmptyChatDirectory() {
+        return {
+            contacts: [],
+            groups: [],
+            refreshedAt: null,
+        };
+    }
+
+    /**
+     * Clones one directory snapshot so callers cannot mutate internal state.
+     */
+    cloneChatDirectory(chatDirectory = this.createEmptyChatDirectory()) {
+        return {
+            contacts: (chatDirectory?.contacts || []).map(entry => ({ ...entry })),
+            groups: (chatDirectory?.groups || []).map(entry => ({ ...entry })),
+            refreshedAt: chatDirectory?.refreshedAt || null,
+        };
+    }
+
+    /**
      * Destroys the current client instance.
      */
     async destroy() {
@@ -461,6 +666,7 @@ class WhatsAppClientManager {
             qrCodeDataUrl: null,
             qrCodeUpdatedAt: null,
             clientInfo: null,
+            chatDirectory: this.createEmptyChatDirectory(),
             disconnectReason: null,
         });
     }
@@ -540,6 +746,7 @@ class WhatsAppClientManager {
             status,
             ready: false,
             clientInfo: null,
+            chatDirectory: this.createEmptyChatDirectory(),
             lastError: {
                 message: String(error?.message || error || "Unknown WhatsApp client error."),
                 at: new Date().toISOString(),

@@ -36,10 +36,10 @@ function createApp() {
     application.get('/', (req, res) => {
         res.templateRender('index', {
             metaTitle: 'WhatsBot · Scheduled WhatsApp delivery',
-            metaDescription: 'Schedule one WhatsApp message, then monitor the current pairing session and QR status from the same page.',
+            metaDescription: 'Schedule one WhatsApp message to a phone number, contact, or group, then monitor the current pairing session and QR status from the same page.',
             canonicalPath: '/',
             heading: 'Schedule one WhatsApp message.',
-            intro: 'Enter the destination number, write the message, choose the local date and time, and let the API queue the delivery.',
+            intro: 'Pick a synced contact or group, or type a destination number manually, then choose the local date and time and let the API queue the delivery.',
             schedulerHint: 'The browser converts your chosen local time into a timezone-aware timestamp before the request is sent to the API.',
             sessionHint: 'Keep an eye on the live session state below so you know whether WhatsApp is already paired or still waiting for a QR scan.',
         });
