@@ -67,11 +67,11 @@
                         </div>
 
                         <div class="form__split">
-                            <label class="form__field" for="recipient-picker">
+                            <label class="form__field" for="recipient-entry">
                                 <span>Pick contact or group</span>
-                                <select id="recipient-picker" name="recipient">
-                                    <option value="">Pair this session to load contacts and groups.</option>
-                                </select>
+                                <input id="recipient-entry" name="recipientEntry" type="search" autocomplete="off" list="recipient-directory" placeholder="Pair this session to load contacts and groups." aria-describedby="recipient-directory-status">
+                                <datalist id="recipient-directory"></datalist>
+                                <input id="recipient-picker" name="recipient" type="hidden" value="">
                             </label>
 
                             <label class="form__field" for="phone-number">

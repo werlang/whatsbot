@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { HttpError } from "../helpers/error.js";
 import { normalizeAccessPassword, normalizeSessionId } from "../helpers/session.js";
+import { WhatsAppSessionAccess } from "../model/whatsapp-session-access.js";
 
 const ACCESS_PASSWORD_ADJECTIVES = [
     "amber",
@@ -89,12 +90,11 @@ const ACCESS_PASSWORD_NOUNS = [
  * Stores the mapping between public session ids and user-facing access passwords.
  */
 class WhatsAppSessionAccessStore {
-    constructor({ authPath, filePath, logger = console } = {}) {
+    constructor({ authPath, filePath, logger = console, sessionAccessModel = WhatsAppSessionAccess } = {}) {
         this.authPath = String(authPath || "").trim() || "/whatsapp/auth";
         this.filePath = filePath || path.join(this.authPath, "whatsbot-session-access.json");
         this.logger = logger;
-        this.entriesBySessionId = new Map();
-        this.sessionIdByPassword = new Map();
+        this.sessionAccessModel = sessionAccessModel;
         this.initializationPromise = null;
     }
 
@@ -106,7 +106,7 @@ class WhatsAppSessionAccessStore {
             return this.initializationPromise;
         }
 
-        this.initializationPromise = this.loadRegistry()
+        this.initializationPromise = this.migrateLegacyRegistry()
             .catch(error => {
                 this.initializationPromise = null;
                 throw error;
@@ -120,7 +120,7 @@ class WhatsAppSessionAccessStore {
      */
     async getBySessionId(sessionId) {
         await this.initialize();
-        const entry = this.entriesBySessionId.get(normalizeSessionId(sessionId, { required: true }));
+        const entry = await this.sessionAccessModel.findBySessionId(sessionId);
         return entry ? this.cloneEntry(entry) : null;
     }
 
@@ -130,22 +130,13 @@ class WhatsAppSessionAccessStore {
     async ensureSessionAccess(sessionId) {
         await this.initialize();
         const normalizedSessionId = normalizeSessionId(sessionId, { required: true });
-        const existingEntry = this.entriesBySessionId.get(normalizedSessionId);
+        const existingEntry = await this.sessionAccessModel.findBySessionId(normalizedSessionId);
 
         if (existingEntry) {
             return this.cloneEntry(existingEntry);
         }
 
-        const entry = {
-            sessionId: normalizedSessionId,
-            accessPassword: this.generateUniqueAccessPassword(),
-            createdAt: new Date().toISOString(),
-        };
-
-        this.entriesBySessionId.set(entry.sessionId, entry);
-        this.sessionIdByPassword.set(entry.accessPassword, entry.sessionId);
-        await this.persistRegistry();
-        return this.cloneEntry(entry);
+        return this.cloneEntry(await this.createSessionAccess({ sessionId: normalizedSessionId }));
     }
 
     /**
@@ -154,13 +145,7 @@ class WhatsAppSessionAccessStore {
     async findByPassword(password) {
         await this.initialize();
         const normalizedPassword = normalizeAccessPassword(password, { required: true });
-        const sessionId = this.sessionIdByPassword.get(normalizedPassword);
-
-        if (!sessionId) {
-            throw new HttpError(401, "Invalid session password.");
-        }
-
-        const entry = this.entriesBySessionId.get(sessionId);
+        const entry = await this.findOptionalByPassword(normalizedPassword);
         if (!entry) {
             throw new HttpError(401, "Invalid session password.");
         }
@@ -180,7 +165,7 @@ class WhatsAppSessionAccessStore {
             return null;
         }
 
-        const entry = this.entriesBySessionId.get(normalizedSessionId);
+        const entry = await this.sessionAccessModel.findBySessionId(normalizedSessionId);
         if (!entry) {
             throw new HttpError(401, "Session password is required.");
         }
@@ -194,24 +179,22 @@ class WhatsAppSessionAccessStore {
     }
 
     /**
-     * Loads any persisted registry entries from disk.
+     * Migrates any legacy JSON-backed session registry entries into MySQL.
      */
-    async loadRegistry() {
-        await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-
+    async migrateLegacyRegistry() {
         let payload = null;
         try {
             const fileContent = await fs.readFile(this.filePath, "utf8");
             payload = JSON.parse(fileContent);
         } catch (error) {
             if (error?.code !== "ENOENT") {
-                this.logger.warn("Could not load WhatsBot session access registry:", error);
+                this.logger.warn("Could not read legacy WhatsBot session access registry:", error);
             }
+
+            return;
         }
 
         const sessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
-        this.entriesBySessionId.clear();
-        this.sessionIdByPassword.clear();
 
         for (const candidate of sessions) {
             try {
@@ -221,44 +204,79 @@ class WhatsAppSessionAccessStore {
                     createdAt: String(candidate?.createdAt || "").trim() || new Date().toISOString(),
                 };
 
-                this.entriesBySessionId.set(entry.sessionId, entry);
-                this.sessionIdByPassword.set(entry.accessPassword, entry.sessionId);
+                await this.createSessionAccess(entry, { preserveAccessPassword: true });
             } catch (error) {
-                this.logger.warn("Skipping invalid session access registry entry:", error?.message || error);
+                this.logger.warn("Skipping legacy session access registry entry:", error?.message || error);
             }
         }
     }
 
     /**
-     * Writes the in-memory registry back to disk.
+     * Creates one persisted access record, retrying password collisions when needed.
      */
-    async persistRegistry() {
-        const payload = {
-            version: 1,
-            sessions: [...this.entriesBySessionId.values()].sort((left, right) => left.sessionId.localeCompare(right.sessionId)),
-        };
+    async createSessionAccess({ sessionId, accessPassword = "", createdAt = null } = {}, { preserveAccessPassword = false } = {}) {
+        const normalizedSessionId = normalizeSessionId(sessionId, { required: true });
 
-        await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-        await fs.writeFile(this.filePath, JSON.stringify(payload, null, 2) + "\n", "utf8");
+        for (let attempt = 0; attempt < 50; attempt += 1) {
+            const candidatePassword = preserveAccessPassword
+                ? normalizeAccessPassword(accessPassword, { required: true })
+                : this.generateUniqueAccessPassword();
+
+            try {
+                const entry = await this.sessionAccessModel.create({
+                    sessionId: normalizedSessionId,
+                    accessPassword: candidatePassword,
+                    createdAt,
+                    updatedAt: createdAt,
+                });
+
+                return this.cloneEntry(entry);
+            } catch (error) {
+                if (!this.isDuplicateEntryError(error)) {
+                    throw error;
+                }
+
+                const existingEntry = await this.sessionAccessModel.findBySessionId(normalizedSessionId);
+                if (existingEntry) {
+                    return this.cloneEntry(existingEntry);
+                }
+
+                if (preserveAccessPassword) {
+                    const existingPasswordEntry = await this.findOptionalByPassword(candidatePassword);
+
+                    if (existingPasswordEntry && existingPasswordEntry.sessionId !== normalizedSessionId) {
+                        throw new HttpError(409, "Session password already belongs to a different session.");
+                    }
+                }
+            }
+        }
+
+        throw new HttpError(500, "Could not generate a unique session password.");
+    }
+
+    /**
+     * Returns one access entry for a password when it exists.
+     */
+    async findOptionalByPassword(password) {
+        return this.sessionAccessModel.findByPassword(password);
+    }
+
+    /**
+     * Returns true when the error wraps one duplicate-key violation.
+     */
+    isDuplicateEntryError(error) {
+        return error?.data?.error?.code === "ER_DUP_ENTRY";
     }
 
     /**
      * Creates one user-friendly access password that is not yet in use.
      */
     generateUniqueAccessPassword() {
-        for (let attempt = 0; attempt < 50; attempt += 1) {
-            const accessPassword = [
-                ACCESS_PASSWORD_ADJECTIVES[crypto.randomInt(0, ACCESS_PASSWORD_ADJECTIVES.length)],
-                ACCESS_PASSWORD_NOUNS[crypto.randomInt(0, ACCESS_PASSWORD_NOUNS.length)],
-                String(crypto.randomInt(1000, 10000)),
-            ].join("-");
-
-            if (!this.sessionIdByPassword.has(accessPassword)) {
-                return accessPassword;
-            }
-        }
-
-        throw new HttpError(500, "Could not generate a unique session password.");
+        return [
+            ACCESS_PASSWORD_ADJECTIVES[crypto.randomInt(0, ACCESS_PASSWORD_ADJECTIVES.length)],
+            ACCESS_PASSWORD_NOUNS[crypto.randomInt(0, ACCESS_PASSWORD_NOUNS.length)],
+            String(crypto.randomInt(1000, 10000)),
+        ].join("-");
     }
 
     /**

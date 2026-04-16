@@ -3,6 +3,7 @@ import { requestApi } from "./helpers/api.js";
 import {
     createDefaultScheduledDateTime,
     convertDateTimeLocalToOffsetIso,
+    formatDateTimeForDisplay,
     formatIsoForDisplay,
     getCurrentTimezoneLabel,
     toDateTimeLocalValue,
@@ -28,6 +29,8 @@ const SESSION_REFRESH_INTERVAL_MS = 15000;
 function createElements() {
     return {
         form: document.querySelector("#schedule-form"),
+        recipientEntry: document.querySelector("#recipient-entry"),
+        recipientDirectory: document.querySelector("#recipient-directory"),
         recipientPicker: document.querySelector("#recipient-picker"),
         recipientDirectoryStatus: document.querySelector("#recipient-directory-status"),
         phoneNumber: document.querySelector("#phone-number"),
@@ -48,6 +51,9 @@ function createElements() {
         activeSessionId: document.querySelector("[data-role=active-session-id]"),
         schedulePresetButtons: [...document.querySelectorAll("[data-role=schedule-preset]")],
         year: document.querySelector("[data-role=year]"),
+        currentSession: null,
+        recipientLabelByValue: new Map(),
+        recipientValueByLabel: new Map(),
     };
 }
 
@@ -80,33 +86,21 @@ function readResponseMessage(response, fallbackMessage) {
  * Renders the latest synced contacts and groups into the recipient picker.
  */
 function renderRecipientDirectory(elements, session) {
-    if (!elements.recipientPicker) {
+    if (!elements.recipientPicker || !elements.recipientDirectory || !elements.recipientEntry) {
         return;
     }
 
+    elements.currentSession = session;
     const directory = readRecipientDirectory(session);
-    const previousValue = elements.recipientPicker.value;
     const totalRecipients = directory.contacts.length + directory.groups.length;
 
-    elements.recipientPicker.replaceChildren();
-
-    const placeholderOption = document.createElement("option");
-    placeholderOption.value = "";
-    placeholderOption.textContent = totalRecipients > 0
-        ? "Type a number or pick a synced chat"
-        : (session?.ready
-            ? "No synced contacts or groups found yet"
-            : "Pair this session to load contacts and groups");
-    elements.recipientPicker.append(placeholderOption);
-
-    appendRecipientGroup(elements.recipientPicker, "Contacts", directory.contacts);
-    appendRecipientGroup(elements.recipientPicker, "Groups", directory.groups);
-
-    elements.recipientPicker.disabled = totalRecipients === 0;
-
-    if ([...elements.recipientPicker.options].some(option => option.value === previousValue)) {
-        elements.recipientPicker.value = previousValue;
-    }
+    renderRecipientAutocomplete(elements, [
+        ...directory.contacts,
+        ...directory.groups,
+    ], {
+        sessionReady: Boolean(session?.ready),
+        totalRecipients,
+    });
 
     if (!elements.recipientDirectoryStatus) {
         return;
@@ -122,62 +116,107 @@ function renderRecipientDirectory(elements, session) {
         return;
     }
 
-    const contactsLabel = `${directory.contacts.length} contact${directory.contacts.length === 1 ? "" : "s"}`;
-    const groupsLabel = `${directory.groups.length} group${directory.groups.length === 1 ? "" : "s"}`;
-    elements.recipientDirectoryStatus.textContent = `Synced ${contactsLabel} and ${groupsLabel}. Pick one here or type a number below.`;
+    const contactsLabel = formatRecipientCount(directory.contacts.length, "contact");
+    const groupsLabel = formatRecipientCount(directory.groups.length, "group");
+
+    elements.recipientDirectoryStatus.textContent = `Synced ${contactsLabel} and ${groupsLabel}. Start typing a name, number, or group, or enter a number manually.`;
 }
 
 /**
- * Appends one optgroup of recipient options when entries are available.
+ * Renders one searchable recipient directory backed by native suggestions.
  */
-function appendRecipientGroup(select, label, entries) {
-    if (!select || !Array.isArray(entries) || entries.length === 0) {
+function renderRecipientAutocomplete(elements, entries, { sessionReady = false, totalRecipients = 0 } = {}) {
+    if (!elements.recipientDirectory || !elements.recipientEntry || !elements.recipientPicker) {
         return;
     }
 
-    const group = document.createElement("optgroup");
-    group.label = label;
+    const previousValue = elements.recipientPicker.value;
+    const previousLabel = elements.recipientLabelByValue.get(previousValue) || String(elements.recipientEntry.value ?? "").trim();
 
-    for (const entry of entries) {
+    elements.recipientDirectory.replaceChildren();
+    elements.recipientLabelByValue = new Map();
+    elements.recipientValueByLabel = new Map();
+
+    for (const entry of Array.isArray(entries) ? entries : []) {
         const option = document.createElement("option");
-        option.value = buildRecipientChoiceValue(entry);
-        option.textContent = entry.phoneNumber
-            ? `${entry.label} · ${entry.phoneNumber}`
-            : entry.label;
-        group.append(option);
+        const optionLabel = formatRecipientOptionLabel(entry);
+
+        option.value = optionLabel;
+        elements.recipientDirectory.append(option);
+        elements.recipientLabelByValue.set(buildRecipientChoiceValue(entry), optionLabel);
+        elements.recipientValueByLabel.set(optionLabel, buildRecipientChoiceValue(entry));
     }
 
-    select.append(group);
+    elements.recipientEntry.disabled = totalRecipients === 0;
+    elements.recipientEntry.placeholder = totalRecipients > 0
+        ? "Start typing a name, number, or group"
+        : (sessionReady
+            ? "No synced contacts or groups found yet"
+            : "Pair this session to load contacts and groups");
+
+    if (previousValue && elements.recipientLabelByValue.has(previousValue)) {
+        elements.recipientEntry.value = elements.recipientLabelByValue.get(previousValue);
+        elements.recipientPicker.value = previousValue;
+        return;
+    }
+
+    if (previousLabel && elements.recipientValueByLabel.has(previousLabel)) {
+        elements.recipientEntry.value = previousLabel;
+        elements.recipientPicker.value = elements.recipientValueByLabel.get(previousLabel);
+        return;
+    }
+
+    if (totalRecipients === 0) {
+        elements.recipientEntry.value = "";
+    }
+
+    syncRecipientSelection(elements);
+}
+
+/**
+ * Formats one recipient entry for the autocomplete suggestions.
+ */
+function formatRecipientOptionLabel(entry) {
+    if (entry?.phoneNumber) {
+        return `${entry.label} · ${entry.phoneNumber}`;
+    }
+
+    return `${entry?.label || "Unknown"} · Group`;
+}
+
+/**
+ * Synchronizes the hidden selected recipient value with the visible entry field.
+ */
+function syncRecipientSelection(elements) {
+    if (!elements.recipientEntry || !elements.recipientPicker) {
+        return;
+    }
+
+    const visibleLabel = String(elements.recipientEntry.value ?? "").trim();
+    elements.recipientPicker.value = elements.recipientValueByLabel.get(visibleLabel) || "";
+}
+
+/**
+ * Formats one recipient count for concise helper copy.
+ */
+function formatRecipientCount(count, label) {
+    return `${count} ${label}${count === 1 ? "" : "s"}`;
 }
 
 /**
  * Formats one datetime-local value into concise preview text.
  */
 function formatScheduledPreview(value) {
-    const normalizedValue = String(value ?? "").trim();
-    if (!normalizedValue) {
-        return "";
-    }
-
-    const localDate = new Date(normalizedValue);
-    if (Number.isNaN(localDate.getTime())) {
-        return "";
-    }
-
-    return new Intl.DateTimeFormat(undefined, {
-        dateStyle: "medium",
-        timeStyle: "short",
-    }).format(localDate);
+    return formatDateTimeForDisplay(value);
 }
 
 /**
  * Returns a friendly recipient label for the live preview.
  */
 function readPreviewRecipient(elements) {
-    const selectedOption = elements.recipientPicker?.selectedOptions?.[0] || null;
     const selectedValue = elements.recipientPicker?.value || "";
-    if (selectedOption && selectedValue) {
-        return selectedOption.textContent.trim();
+    if (selectedValue) {
+        return elements.recipientLabelByValue.get(selectedValue) || String(elements.recipientEntry?.value ?? "").trim();
     }
 
     const phoneNumber = String(elements.phoneNumber?.value ?? "").trim();
@@ -286,7 +325,14 @@ function bindInteractiveFormHelpers(elements) {
         renderFormEnhancements(elements);
     };
 
-    elements.recipientPicker?.addEventListener("change", rerender);
+    elements.recipientEntry?.addEventListener("input", function() {
+        syncRecipientSelection(elements);
+        rerender();
+    });
+    elements.recipientEntry?.addEventListener("change", function() {
+        syncRecipientSelection(elements);
+        renderFormEnhancements(elements);
+    });
     elements.phoneNumber?.addEventListener("input", rerender);
     elements.message?.addEventListener("input", renderFormEnhancements.bind(null, elements));
     elements.scheduledFor?.addEventListener("input", rerender);

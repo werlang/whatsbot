@@ -1,3 +1,5 @@
+import { formatDateTimeForDisplay } from "./datetime.js";
+
 /**
  * Normalizes unknown values into one trimmed string.
  */
@@ -26,15 +28,7 @@ export function humanizeSessionToken(value) {
  * Formats one session timestamp for concise UI copy.
  */
 export function formatSessionTimestamp(value, locale) {
-    const date = new Date(value || "");
-    if (Number.isNaN(date.getTime())) {
-        return "";
-    }
-
-    return new Intl.DateTimeFormat(locale, {
-        dateStyle: "medium",
-        timeStyle: "short",
-    }).format(date);
+    return formatDateTimeForDisplay(value, locale);
 }
 
 /**

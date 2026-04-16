@@ -89,9 +89,9 @@ export function convertDateTimeLocalToOffsetIso(value) {
 }
 
 /**
- * Formats one ISO timestamp for concise UI feedback.
+ * Formats one date-like value using the app's 24-hour display convention.
  */
-export function formatIsoForDisplay(value, locale) {
+export function formatDateTimeForDisplay(value, locale) {
     const date = new Date(value || "");
     if (Number.isNaN(date.getTime())) {
         return "";
@@ -100,7 +100,16 @@ export function formatIsoForDisplay(value, locale) {
     return new Intl.DateTimeFormat(locale, {
         dateStyle: "medium",
         timeStyle: "short",
+        hour12: false,
+        hourCycle: "h23",
     }).format(date);
+}
+
+/**
+ * Formats one ISO timestamp for concise UI feedback.
+ */
+export function formatIsoForDisplay(value, locale) {
+    return formatDateTimeForDisplay(value, locale);
 }
 
 /**

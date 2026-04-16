@@ -3,6 +3,8 @@ import test from "node:test";
 import {
     convertDateTimeLocalToOffsetIso,
     createDefaultScheduledDateTime,
+    formatDateTimeForDisplay,
+    formatIsoForDisplay,
 } from "../public/js/helpers/datetime.js";
 import {
     buildRecipientChoiceValue,
@@ -10,7 +12,7 @@ import {
     readRecipientDirectory,
     resolveScheduledMessageTarget,
 } from "../public/js/helpers/recipient.js";
-import { describeSession } from "../public/js/helpers/session.js";
+import { describeSession, formatSessionTimestamp } from "../public/js/helpers/session.js";
 
 test("convertDateTimeLocalToOffsetIso returns a timezone-aware ISO timestamp", () => {
     const iso = convertDateTimeLocalToOffsetIso("2026-04-15T18:30");
@@ -27,6 +29,12 @@ test("convertDateTimeLocalToOffsetIso returns a timezone-aware ISO timestamp", (
 test("createDefaultScheduledDateTime returns a datetime-local friendly value", () => {
     const value = createDefaultScheduledDateTime(new Date(2026, 3, 15, 18, 30, 40));
     assert.match(value, /^2026-04-15T18:35$/);
+});
+
+test("display helpers force a 24-hour clock", () => {
+    assert.match(formatDateTimeForDisplay("2026-04-15T18:30:00", "en-US"), /18:30/);
+    assert.match(formatIsoForDisplay("2026-04-15T18:30:00", "en-US"), /18:30/);
+    assert.match(formatSessionTimestamp("2026-04-15T18:30:00", "en-US"), /18:30/);
 });
 
 test("describeSession highlights QR pairing without blocking future scheduling", () => {
