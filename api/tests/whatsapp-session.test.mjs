@@ -325,6 +325,54 @@ test("WhatsAppClientManager reads contacts and groups from the WhatsApp chat lis
     assert.match(directory.refreshedAt, /^2026|^20/);
 });
 
+test("WhatsAppClientManager resolves LID-backed contacts to phone numbers in the chat directory", async () => {
+    const manager = new WhatsAppClientManager({
+        clientId: "main",
+        authPath: "/tmp/whatsapp-auth",
+        executablePath: "/usr/bin/chromium-browser",
+        puppeteerArgs: [],
+    });
+
+    manager.state.ready = true;
+    manager.client = {
+        async getChats() {
+            return [{
+                id: {
+                    _serialized: "64540523888721@lid",
+                    user: "64540523888721",
+                    server: "lid",
+                },
+                isGroup: false,
+                formattedTitle: "Alice",
+                contact: {
+                    number: "64540523888721",
+                    id: {
+                        _serialized: "64540523888721@lid",
+                        user: "64540523888721",
+                        server: "lid",
+                    },
+                },
+            }];
+        },
+        pupPage: {
+            async evaluate(_fn, identifier) {
+                assert.equal(identifier, "64540523888721@lid");
+                return "5551999999999";
+            },
+        },
+    };
+
+    const directory = await manager.refreshChatDirectory({ force: true });
+
+    assert.deepEqual(directory.contacts, [{
+        targetType: "contact",
+        targetValue: "5551999999999",
+        phoneNumber: "5551999999999",
+        chatId: "64540523888721@lid",
+        label: "Alice",
+    }]);
+});
+
 test("WhatsAppClientManager retries Brazil mobile numbers with and without the ninth digit", async () => {
     const manager = new WhatsAppClientManager({
         clientId: "main",

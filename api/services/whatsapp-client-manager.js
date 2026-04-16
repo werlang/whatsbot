@@ -537,7 +537,7 @@ class WhatsAppClientManager {
         const groups = [];
 
         for (const chat of chats) {
-            const directoryEntry = this.readDirectoryEntry(chat);
+            const directoryEntry = await this.readDirectoryEntry(chat);
 
             if (!directoryEntry) {
                 continue;
@@ -566,7 +566,7 @@ class WhatsAppClientManager {
     /**
      * Normalizes one WhatsApp chat into one directory entry.
      */
-    readDirectoryEntry(chat) {
+    async readDirectoryEntry(chat) {
         const chatId = chat?.id?._serialized || null;
 
         if (!chatId || chatId.endsWith("@broadcast") || chatId === "status@broadcast") {
@@ -577,14 +577,14 @@ class WhatsAppClientManager {
             return this.readGroupDirectoryEntry(chat, chatId);
         }
 
-        return this.readContactDirectoryEntry(chat, chatId);
+        return await this.readContactDirectoryEntry(chat, chatId);
     }
 
     /**
      * Normalizes one contact chat into a directory entry.
      */
-    readContactDirectoryEntry(chat, chatId) {
-        const phoneNumber = this.readDirectoryPhoneNumber(chat, chatId);
+    async readContactDirectoryEntry(chat, chatId) {
+        const phoneNumber = await this.readDirectoryPhoneNumber(chat, chatId);
 
         if (!phoneNumber) {
             return null;
@@ -631,9 +631,16 @@ class WhatsAppClientManager {
     /**
      * Reads a normalized phone number from one contact chat.
      */
-    readDirectoryPhoneNumber(chat, chatId) {
+    async readDirectoryPhoneNumber(chat, chatId) {
+        const resolvedPhoneNumber = await this.resolveDirectoryPhoneNumber(chat, chatId);
+
+        if (resolvedPhoneNumber) {
+            return resolvedPhoneNumber;
+        }
+
         const candidates = [
             chat?.contact?.number,
+            chat?.contact?.id?.user,
             chat?.id?.user,
             typeof chatId === "string" ? chatId.replace(/@c\.us$/i, "") : null,
         ];
@@ -647,6 +654,48 @@ class WhatsAppClientManager {
         }
 
         return null;
+    }
+
+    /**
+     * Resolves a canonical phone number for chats backed by WhatsApp LID identities.
+     */
+    async resolveDirectoryPhoneNumber(chat, chatId) {
+        const rawIdentifiers = [
+            chat?.contact?.id?._serialized,
+            chat?.id?._serialized,
+            chatId,
+        ].filter(value => typeof value === "string" && value.trim());
+
+        const needsResolution = rawIdentifiers.some(identifier => /@lid$/i.test(identifier))
+            || chat?.contact?.id?.server === "lid"
+            || chat?.id?.server === "lid";
+
+        if (!needsResolution || !this.client?.pupPage) {
+            return null;
+        }
+
+        for (const identifier of rawIdentifiers) {
+            const phoneNumber = await this.resolvePhoneNumberFromWid(identifier);
+
+            if (phoneNumber) {
+                return phoneNumber;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Uses whatsapp-web.js injected helpers to convert one LID-backed wid into a phone number.
+     */
+    async resolvePhoneNumberFromWid(identifier) {
+        const phoneUser = await this.client.pupPage.evaluate(async currentIdentifier => {
+            const resolved = await window.WWebJS.enforceLidAndPnRetrieval(currentIdentifier);
+            return resolved?.phone?.user || null;
+        }, identifier);
+
+        const digits = String(phoneUser ?? "").replace(/\D/g, "");
+        return digits.length >= 10 && digits.length <= 15 ? digits : null;
     }
 
     /**
