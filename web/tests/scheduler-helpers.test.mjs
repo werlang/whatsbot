@@ -53,11 +53,31 @@ test("describeSession highlights QR pairing without blocking future scheduling",
     });
 
     assert.equal(summary.label, "Pairing required");
+    assert.equal(summary.phase, "awaiting-qr");
     assert.equal(summary.tone, "warning");
     assert.equal(summary.showQr, true);
     assert.match(summary.note, /still schedule future messages/i);
     assert.match(summary.connection, /42%/);
     assert.match(summary.lastEventLabel, /Last update:/);
+});
+
+test("describeSession exposes one connecting phase after the QR scan is accepted", () => {
+    const summary = describeSession({
+        status: "authenticating",
+        ready: false,
+        authenticated: true,
+        hasQrCode: false,
+        connectionState: "CONNECTED",
+        loading: {
+            percent: 87,
+            message: "Opening chats",
+        },
+    });
+
+    assert.equal(summary.phase, "connecting");
+    assert.equal(summary.label, "Authenticating");
+    assert.match(summary.note, /still connecting/i);
+    assert.match(summary.connection, /87%/);
 });
 
 test("readRecipientDirectory normalizes contacts and groups from one session payload", () => {

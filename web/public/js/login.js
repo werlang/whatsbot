@@ -10,6 +10,9 @@ import {
 import { TemplateVar } from "./helpers/template-var.js";
 
 const SESSION_REFRESH_INTERVAL_MS = 15000;
+const ACTIVE_PAIRING_REFRESH_INTERVAL_MS = 4000;
+const CONNECTING_REFRESH_INTERVAL_MS = 2000;
+const REDIRECT_DELAY_MS = 1200;
 
 /**
  * Collects the DOM nodes used by the login page.
@@ -37,8 +40,32 @@ function createElements() {
         sessionId: document.querySelector("[data-role=session-id]"),
         sessionIdPanel: document.querySelector("[data-role=session-id-panel]"),
         schedulerLink: document.querySelector("[data-role=scheduler-link]"),
+        sessionProgress: document.querySelector("[data-role=session-progress]"),
+        sessionProgressEyebrow: document.querySelector("[data-role=session-progress-eyebrow]"),
+        sessionProgressBody: document.querySelector("[data-role=session-progress-body]"),
+        sessionProgressMeta: document.querySelector("[data-role=session-progress-meta]"),
+        sessionProgressFill: document.querySelector("[data-role=session-progress-fill]"),
+        sessionCheckNow: document.querySelector("[data-role=session-check-now]"),
+        sessionReload: document.querySelector("[data-role=session-reload]"),
         onboardingSteps: [...document.querySelectorAll("[data-step]")],
         year: document.querySelector("[data-role=year]"),
+    };
+}
+
+/**
+ * Creates the transient browser state used by the login polling flow.
+ */
+function createLoginUiState() {
+    return {
+        isRefreshing: false,
+        refreshTimerId: 0,
+        countdownTimerId: 0,
+        nextRefreshAt: 0,
+        lastRefreshAt: 0,
+        previousDescription: null,
+        pairingDetected: false,
+        redirectScheduled: false,
+        redirectTimerId: 0,
     };
 }
 
@@ -243,6 +270,233 @@ function renderSessionState(elements, sessionId, description) {
 }
 
 /**
+ * Formats one refresh countdown in seconds.
+ */
+function formatCountdownLabel(targetTimestamp) {
+    const remainingMs = Math.max(0, Number(targetTimestamp) - Date.now());
+    const remainingSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
+    return `Checking again in ${remainingSeconds}s.`;
+}
+
+/**
+ * Returns the polling interval that matches the current pairing phase.
+ */
+function getRefreshInterval(description = {}) {
+    if (description.phase === "awaiting-qr") {
+        return ACTIVE_PAIRING_REFRESH_INTERVAL_MS;
+    }
+
+    if (description.phase === "connecting") {
+        return CONNECTING_REFRESH_INTERVAL_MS;
+    }
+
+    return SESSION_REFRESH_INTERVAL_MS;
+}
+
+/**
+ * Renders one progress card that explains what the user should do next.
+ */
+function renderPairingGuidance(elements, description = {}, uiState, { hasSession = false } = {}) {
+    if (!elements.sessionProgress) {
+        return;
+    }
+
+    let eyebrow = "Waiting to start";
+    let body = "Create a session to begin pairing. This page checks automatically and opens your workspace when WhatsApp is ready.";
+    let progress = 8;
+
+    if (description.phase === "awaiting-qr") {
+        eyebrow = "Waiting for scan";
+        body = "Open WhatsApp on your phone and scan the QR code shown below. Keep this page open while we watch for the scan.";
+        progress = 38;
+    } else if (description.phase === "connecting") {
+        eyebrow = uiState.pairingDetected ? "Scan detected" : "Finishing setup";
+        body = uiState.pairingDetected
+            ? "The QR scan was detected. WhatsApp is finishing the connection now. Wait here and this page will open your workspace automatically."
+            : "WhatsApp accepted the session and is still finishing setup. Wait a few seconds while we keep checking.";
+        progress = 74;
+    } else if (description.phase === "ready") {
+        eyebrow = "Connected";
+        body = "Pairing is complete. Opening your workspace now.";
+        progress = 100;
+    } else if (description.phase === "disconnected") {
+        eyebrow = "Need another scan";
+        body = "The session disconnected before it finished connecting. Wait for a fresh QR code or reload this page if nothing changes.";
+        progress = 28;
+    } else if (description.phase === "error") {
+        eyebrow = "Need attention";
+        body = "WhatsApp reported a connection problem. Use Check now to retry, or reload the page if the status stays the same.";
+        progress = 20;
+    } else if (hasSession) {
+        eyebrow = "Preparing session";
+        body = "The session exists and WhatsApp is still starting. Wait here and we will keep checking for the next pairing step.";
+        progress = 18;
+    }
+
+    if (elements.sessionProgressEyebrow) {
+        elements.sessionProgressEyebrow.textContent = eyebrow;
+    }
+
+    if (elements.sessionProgressBody) {
+        elements.sessionProgressBody.textContent = body;
+    }
+
+    if (elements.sessionProgressFill) {
+        elements.sessionProgressFill.style.width = `${progress}%`;
+    }
+
+    updatePairingGuidanceMeta(elements, uiState, { hasSession, isReady: description.phase === "ready" });
+}
+
+/**
+ * Updates the progress-card meta line with the next polling action.
+ */
+function updatePairingGuidanceMeta(elements, uiState, { hasSession = false, isReady = false } = {}) {
+    if (!elements.sessionProgressMeta) {
+        return;
+    }
+
+    if (!hasSession) {
+        elements.sessionProgressMeta.textContent = "Create a session to begin pairing.";
+        return;
+    }
+
+    if (isReady) {
+        elements.sessionProgressMeta.textContent = "Redirecting automatically.";
+        return;
+    }
+
+    if (!uiState.nextRefreshAt) {
+        elements.sessionProgressMeta.textContent = uiState.lastRefreshAt
+            ? "Check now if you want to refresh immediately."
+            : "Waiting for the first session update.";
+        return;
+    }
+
+    elements.sessionProgressMeta.textContent = formatCountdownLabel(uiState.nextRefreshAt);
+}
+
+/**
+ * Starts or restarts the short countdown shown in the pairing guidance card.
+ */
+function startGuidanceCountdown(elements, uiState, options = {}) {
+    if (uiState.countdownTimerId) {
+        globalThis.clearInterval(uiState.countdownTimerId);
+    }
+
+    updatePairingGuidanceMeta(elements, uiState, options);
+
+    if (!uiState.nextRefreshAt) {
+        uiState.countdownTimerId = 0;
+        return;
+    }
+
+    uiState.countdownTimerId = globalThis.setInterval(function() {
+        updatePairingGuidanceMeta(elements, uiState, options);
+
+        if (Date.now() >= uiState.nextRefreshAt) {
+            globalThis.clearInterval(uiState.countdownTimerId);
+            uiState.countdownTimerId = 0;
+        }
+    }, 1000);
+}
+
+/**
+ * Clears any active polling and countdown timers.
+ */
+function clearSessionRefresh(uiState) {
+    if (uiState.refreshTimerId) {
+        globalThis.clearTimeout(uiState.refreshTimerId);
+        uiState.refreshTimerId = 0;
+    }
+
+    if (uiState.countdownTimerId) {
+        globalThis.clearInterval(uiState.countdownTimerId);
+        uiState.countdownTimerId = 0;
+    }
+
+    uiState.nextRefreshAt = 0;
+}
+
+/**
+ * Schedules the next session refresh using the current session phase.
+ */
+function scheduleSessionRefresh(elements, sessionAccess, uiState, description) {
+    clearSessionRefresh(uiState);
+
+    if (!sessionAccess?.sessionId || !sessionAccess?.accessPassword || description?.phase === "ready") {
+        updatePairingGuidanceMeta(elements, uiState, {
+            hasSession: Boolean(sessionAccess?.sessionId),
+            isReady: description?.phase === "ready",
+        });
+        return;
+    }
+
+    const intervalMs = getRefreshInterval(description);
+    uiState.nextRefreshAt = Date.now() + intervalMs;
+    uiState.refreshTimerId = globalThis.setTimeout(function() {
+        void refreshSessionState(elements, sessionAccess, uiState);
+    }, intervalMs);
+
+    startGuidanceCountdown(elements, uiState, {
+        hasSession: true,
+        isReady: false,
+    });
+}
+
+/**
+ * Loads one session state and updates the pairing UX around it.
+ */
+async function refreshSessionState(elements, sessionAccess, uiState, { redirectWhenReady = true, force = false } = {}) {
+    if (!sessionAccess?.sessionId || !sessionAccess?.accessPassword) {
+        return null;
+    }
+
+    if (uiState.isRefreshing && !force) {
+        return null;
+    }
+
+    uiState.isRefreshing = true;
+    uiState.lastRefreshAt = Date.now();
+
+    try {
+        const session = await loadSessionState(elements, sessionAccess, { redirectWhenReady: false });
+        if (!session) {
+            clearSessionRefresh(uiState);
+            renderPairingGuidance(elements, {}, uiState, { hasSession: true });
+            return null;
+        }
+
+        const description = describeSession(session);
+        const scanJustDetected = uiState.previousDescription?.phase === "awaiting-qr" && description.phase === "connecting";
+        if (scanJustDetected) {
+            uiState.pairingDetected = true;
+            setFeedback(elements.feedback, "success", "QR scan detected. WhatsApp is finishing the connection now. Keep this page open.");
+        } else if (description.phase === "awaiting-qr") {
+            uiState.pairingDetected = false;
+        }
+
+        renderPairingGuidance(elements, description, uiState, { hasSession: true });
+        uiState.previousDescription = description;
+
+        if (description.phase === "ready" && redirectWhenReady && !uiState.redirectScheduled) {
+            uiState.redirectScheduled = true;
+            clearSessionRefresh(uiState);
+            setFeedback(elements.feedback, "success", "Pairing complete. Opening your workspace...");
+            uiState.redirectTimerId = globalThis.setTimeout(function() {
+                openSchedulerForSession(sessionAccess, { replace: true });
+            }, REDIRECT_DELAY_MS);
+            return session;
+        }
+
+        scheduleSessionRefresh(elements, sessionAccess, uiState, description);
+        return session;
+    } finally {
+        uiState.isRefreshing = false;
+    }
+}
+
+/**
  * Loads one session state from the API using the session password.
  */
 async function loadSessionState(elements, sessionAccess, { redirectWhenReady = true } = {}) {
@@ -377,6 +631,7 @@ async function loginWithPassword(elements) {
  */
 function initLoginPage() {
     const elements = createElements();
+    const uiState = createLoginUiState();
     if (!elements.createButton || !elements.sessionStatus) {
         return;
     }
@@ -387,16 +642,13 @@ function initLoginPage() {
 
     let pendingSessionAccess = readPendingSessionAccess();
     renderOnboardingSteps(elements, pendingSessionAccess);
+    renderPairingGuidance(elements, {}, uiState, {
+        hasSession: Boolean(pendingSessionAccess.sessionId && pendingSessionAccess.accessPassword),
+    });
 
     if (pendingSessionAccess.sessionId && pendingSessionAccess.accessPassword) {
-        loadSessionState(elements, pendingSessionAccess);
+        void refreshSessionState(elements, pendingSessionAccess, uiState);
     }
-
-    globalThis.setInterval(function() {
-        if (pendingSessionAccess.sessionId && pendingSessionAccess.accessPassword) {
-            loadSessionState(elements, pendingSessionAccess);
-        }
-    }, SESSION_REFRESH_INTERVAL_MS);
 
     if (elements.sessionSecretCopy) {
         elements.sessionSecretCopy.addEventListener("click", async function() {
@@ -434,6 +686,24 @@ function initLoginPage() {
         });
     }
 
+    if (elements.sessionCheckNow) {
+        elements.sessionCheckNow.addEventListener("click", function() {
+            if (!pendingSessionAccess.sessionId || !pendingSessionAccess.accessPassword) {
+                setFeedback(elements.feedback, "info", "Create or restore a session first.");
+                return;
+            }
+
+            setFeedback(elements.feedback, "info", "Checking session status now...");
+            void refreshSessionState(elements, pendingSessionAccess, uiState, { force: true });
+        });
+    }
+
+    if (elements.sessionReload) {
+        elements.sessionReload.addEventListener("click", function() {
+            globalThis.location.reload();
+        });
+    }
+
     if (elements.sessionSecretDialog) {
         elements.sessionSecretDialog.addEventListener("click", function(event) {
             if (event.target === elements.sessionSecretDialog) {
@@ -451,7 +721,9 @@ function initLoginPage() {
             }
 
             pendingSessionAccess = restoredSessionAccess;
-            await loadSessionState(elements, pendingSessionAccess);
+            uiState.redirectScheduled = false;
+            void globalThis.clearTimeout(uiState.redirectTimerId);
+            await refreshSessionState(elements, pendingSessionAccess, uiState, { force: true });
         });
     }
 
@@ -462,7 +734,12 @@ function initLoginPage() {
         }
 
         pendingSessionAccess = createdSessionAccess;
-        await loadSessionState(elements, pendingSessionAccess, { redirectWhenReady: false });
+        uiState.redirectScheduled = false;
+        globalThis.clearTimeout(uiState.redirectTimerId);
+        await refreshSessionState(elements, pendingSessionAccess, uiState, {
+            redirectWhenReady: true,
+            force: true,
+        });
     });
 }
 

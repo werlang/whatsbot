@@ -148,6 +148,21 @@
                         <p class="session-card__meta" id="session-client-info" data-role="session-client-info" hidden></p>
                     </div>
 
+                    <section class="session-progress" data-role="session-progress" aria-live="polite">
+                        <div class="session-progress__header">
+                            <p class="session-progress__eyebrow" data-role="session-progress-eyebrow">Checking session</p>
+                            <p class="session-progress__meta" data-role="session-progress-meta">Loading the latest WhatsApp state.</p>
+                        </div>
+                        <p class="session-progress__body" data-role="session-progress-body">This workspace keeps checking the session automatically while you can still prepare or queue future messages.</p>
+                        <div class="session-progress__bar" aria-hidden="true">
+                            <span class="session-progress__fill" data-role="session-progress-fill"></span>
+                        </div>
+                        <div class="session-progress__actions">
+                            <button class="button button--ghost" data-role="session-check-now" type="button">Check now</button>
+                            <a class="button button--secondary" href="/login">Pair another phone</a>
+                        </div>
+                    </section>
+
                     <figure class="qr-panel" id="session-qr-panel" data-role="session-qr-panel" hidden>
                         <img id="session-qr-image" data-role="session-qr-image" alt="WhatsApp QR code for pairing this scheduler session">
                         <figcaption>Scan to pair.</figcaption>

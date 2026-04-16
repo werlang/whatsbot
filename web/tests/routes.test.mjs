@@ -55,6 +55,8 @@ test("GET /session/main renders the scheduler UI shell", async () => {
         assert.match(body, /id="scheduled-for"/);
         assert.match(body, /WhatsApp session/);
         assert.match(body, /id="session-status"/);
+        assert.match(body, /data-role="session-progress-body"/);
+        assert.match(body, /data-role="session-check-now"/);
         assert.match(body, /Schedule message/);
     } finally {
         await stopTestServer(server);
@@ -79,6 +81,8 @@ test("GET /login renders the session pairing flow", async () => {
         assert.match(body, /Copy the password now/);
         assert.match(body, /Pairing status/);
         assert.match(body, /id="session-status"/);
+        assert.match(body, /data-role="session-check-now"/);
+        assert.match(body, /data-role="session-progress-body"/);
     } finally {
         await stopTestServer(server);
     }

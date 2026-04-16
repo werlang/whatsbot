@@ -22,6 +22,8 @@ import {
 } from "./helpers/session-id.js";
 
 const SESSION_REFRESH_INTERVAL_MS = 15000;
+const ACTIVE_PAIRING_REFRESH_INTERVAL_MS = 4000;
+const CONNECTING_REFRESH_INTERVAL_MS = 2000;
 
 /**
  * Collects the DOM nodes used by the scheduler page.
@@ -45,6 +47,12 @@ function createElements() {
         sessionClientInfo: document.querySelector("#session-client-info"),
         sessionQrPanel: document.querySelector("#session-qr-panel"),
         sessionQrImage: document.querySelector("#session-qr-image"),
+        sessionProgress: document.querySelector("[data-role=session-progress]"),
+        sessionProgressEyebrow: document.querySelector("[data-role=session-progress-eyebrow]"),
+        sessionProgressBody: document.querySelector("[data-role=session-progress-body]"),
+        sessionProgressMeta: document.querySelector("[data-role=session-progress-meta]"),
+        sessionProgressFill: document.querySelector("[data-role=session-progress-fill]"),
+        sessionCheckNow: document.querySelector("[data-role=session-check-now]"),
         schedulePreview: document.querySelector("[data-role=schedule-preview]"),
         messageCounter: document.querySelector("[data-role=message-counter]"),
         timezoneLabels: [...document.querySelectorAll("[data-role=timezone-label]")],
@@ -54,6 +62,15 @@ function createElements() {
         currentSession: null,
         recipientLabelByValue: new Map(),
         recipientValueByLabel: new Map(),
+        uiState: {
+            isRefreshingSession: false,
+            refreshTimerId: 0,
+            countdownTimerId: 0,
+            nextRefreshAt: 0,
+            lastRefreshAt: 0,
+            pairingDetected: false,
+            previousDescription: null,
+        },
     };
 }
 
@@ -419,43 +436,227 @@ function renderSessionState(elements, description) {
 }
 
 /**
- * Loads the latest WhatsApp session state from the API.
+ * Returns the polling interval that matches the current session phase.
  */
-async function loadSessionState(elements, sessionAccess) {
-    const response = await requestApi(`/whatsapp/session?sessionId=${encodeURIComponent(sessionAccess.sessionId)}`, {
-        headers: buildSessionAccessHeaders(sessionAccess.accessPassword),
-    });
+function getSessionRefreshInterval(description = {}) {
+    if (description.phase === "awaiting-qr") {
+        return ACTIVE_PAIRING_REFRESH_INTERVAL_MS;
+    }
 
-    console.debug("[WhatsBot] Scheduler session refresh", {
-        sessionId: sessionAccess.sessionId,
-        ok: response.ok,
-        session: response.data?.session || null,
-    });
+    if (description.phase === "connecting") {
+        return CONNECTING_REFRESH_INTERVAL_MS;
+    }
 
-    if (response.status === 401) {
-        clearStoredSessionAccess();
-        globalThis.location.replace("/login");
+    return SESSION_REFRESH_INTERVAL_MS;
+}
+
+/**
+ * Formats the time until the next automatic scheduler refresh.
+ */
+function formatRefreshCountdown(targetTimestamp) {
+    const remainingMs = Math.max(0, Number(targetTimestamp) - Date.now());
+    const remainingSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
+    return `Checking again in ${remainingSeconds}s.`;
+}
+
+/**
+ * Updates the session progress meta line.
+ */
+function updateSessionProgressMeta(elements) {
+    if (!elements.sessionProgressMeta) {
         return;
     }
 
-    if (!response.ok || !response.data || !response.data.session) {
-        renderSessionState(elements, {
-            label: "Unavailable",
-            tone: "danger",
-            connection: "Could not load the current session state.",
-            note: "Check whether the API service is reachable. You can still try scheduling future messages after the API reconnects.",
-            lastEventLabel: "",
-            clientLabel: "",
-            showQr: false,
-            qrCodeDataUrl: "",
+    const uiState = elements.uiState;
+    if (!uiState.nextRefreshAt) {
+        elements.sessionProgressMeta.textContent = uiState.lastRefreshAt
+            ? "Use Check now if you want an immediate refresh."
+            : "Loading the latest WhatsApp state.";
+        return;
+    }
+
+    elements.sessionProgressMeta.textContent = formatRefreshCountdown(uiState.nextRefreshAt);
+}
+
+/**
+ * Starts the visible session refresh countdown.
+ */
+function startSessionCountdown(elements) {
+    const uiState = elements.uiState;
+
+    if (uiState.countdownTimerId) {
+        globalThis.clearInterval(uiState.countdownTimerId);
+    }
+
+    updateSessionProgressMeta(elements);
+
+    if (!uiState.nextRefreshAt) {
+        uiState.countdownTimerId = 0;
+        return;
+    }
+
+    uiState.countdownTimerId = globalThis.setInterval(function() {
+        updateSessionProgressMeta(elements);
+
+        if (Date.now() >= uiState.nextRefreshAt) {
+            globalThis.clearInterval(uiState.countdownTimerId);
+            uiState.countdownTimerId = 0;
+        }
+    }, 1000);
+}
+
+/**
+ * Clears any active session refresh timers.
+ */
+function clearSessionRefresh(elements) {
+    const uiState = elements.uiState;
+
+    if (uiState.refreshTimerId) {
+        globalThis.clearTimeout(uiState.refreshTimerId);
+        uiState.refreshTimerId = 0;
+    }
+
+    if (uiState.countdownTimerId) {
+        globalThis.clearInterval(uiState.countdownTimerId);
+        uiState.countdownTimerId = 0;
+    }
+
+    uiState.nextRefreshAt = 0;
+}
+
+/**
+ * Renders one action-oriented session progress card for the scheduler workspace.
+ */
+function renderSessionProgress(elements, description = {}) {
+    if (!elements.sessionProgress) {
+        return;
+    }
+
+    const uiState = elements.uiState;
+    let eyebrow = "Preparing workspace";
+    let body = "This workspace keeps checking the session automatically while you can still prepare or queue future messages.";
+    let progress = 16;
+
+    if (description.phase === "awaiting-qr") {
+        eyebrow = "Waiting for scan";
+        body = "Scan the QR code below with WhatsApp on your phone. You can already write the message and choose the delivery time while this session finishes pairing.";
+        progress = 38;
+    } else if (description.phase === "connecting") {
+        eyebrow = uiState.pairingDetected ? "Scan detected" : "Finishing setup";
+        body = uiState.pairingDetected
+            ? "The QR scan was detected. WhatsApp is finishing the connection now. Keep this page open and the session tools will update automatically."
+            : "WhatsApp accepted the session and is still loading chats. You can keep preparing messages while we continue checking.";
+        progress = 74;
+    } else if (description.phase === "ready") {
+        eyebrow = "Session ready";
+        body = "WhatsApp is connected. Contacts, groups, and scheduled deliveries should now work normally.";
+        progress = 100;
+    } else if (description.phase === "disconnected") {
+        eyebrow = "Connection interrupted";
+        body = "This session disconnected. Wait for a fresh QR code, or use Pair another phone if you need to restart the pairing flow.";
+        progress = 24;
+    } else if (description.phase === "error") {
+        eyebrow = "Need attention";
+        body = "The session could not be refreshed right now. Use Check now to retry, or reopen the pairing page if the problem continues.";
+        progress = 20;
+    }
+
+    if (elements.sessionProgressEyebrow) {
+        elements.sessionProgressEyebrow.textContent = eyebrow;
+    }
+
+    if (elements.sessionProgressBody) {
+        elements.sessionProgressBody.textContent = body;
+    }
+
+    if (elements.sessionProgressFill) {
+        elements.sessionProgressFill.style.width = `${progress}%`;
+    }
+
+    updateSessionProgressMeta(elements);
+}
+
+/**
+ * Plans the next automatic refresh of the workspace session state.
+ */
+function scheduleSessionRefresh(elements, sessionAccess, description = {}) {
+    clearSessionRefresh(elements);
+
+    const intervalMs = getSessionRefreshInterval(description);
+    elements.uiState.nextRefreshAt = Date.now() + intervalMs;
+    elements.uiState.refreshTimerId = globalThis.setTimeout(function() {
+        void refreshSessionState(elements, sessionAccess);
+    }, intervalMs);
+
+    startSessionCountdown(elements);
+}
+
+/**
+ * Loads the latest WhatsApp session state from the API and updates scheduler guidance.
+ */
+async function refreshSessionState(elements, sessionAccess, { force = false } = {}) {
+    const uiState = elements.uiState;
+
+    if (uiState.isRefreshingSession && !force) {
+        return;
+    }
+
+    uiState.isRefreshingSession = true;
+    uiState.lastRefreshAt = Date.now();
+
+    try {
+        const response = await requestApi(`/whatsapp/session?sessionId=${encodeURIComponent(sessionAccess.sessionId)}`, {
+            headers: buildSessionAccessHeaders(sessionAccess.accessPassword),
         });
-        renderRecipientDirectory(elements, null);
-        return;
-    }
 
-    renderSessionState(elements, describeSession(response.data.session));
-    renderRecipientDirectory(elements, response.data.session);
-    renderFormEnhancements(elements);
+        console.debug("[WhatsBot] Scheduler session refresh", {
+            sessionId: sessionAccess.sessionId,
+            ok: response.ok,
+            session: response.data?.session || null,
+        });
+
+        if (response.status === 401) {
+            clearStoredSessionAccess();
+            globalThis.location.replace("/login");
+            return;
+        }
+
+        if (!response.ok || !response.data || !response.data.session) {
+            clearSessionRefresh(elements);
+            renderSessionState(elements, {
+                label: "Unavailable",
+                tone: "danger",
+                connection: "Could not load the current session state.",
+                note: "Check whether the API service is reachable. You can still try scheduling future messages after the API reconnects.",
+                lastEventLabel: "",
+                clientLabel: "",
+                showQr: false,
+                qrCodeDataUrl: "",
+            });
+            renderSessionProgress(elements, { phase: "error" });
+            renderRecipientDirectory(elements, null);
+            return;
+        }
+
+        const description = describeSession(response.data.session);
+        const scanJustDetected = uiState.previousDescription?.phase === "awaiting-qr" && description.phase === "connecting";
+        if (scanJustDetected) {
+            uiState.pairingDetected = true;
+            setFeedback(elements.formFeedback, "info", "QR scan detected. WhatsApp is finishing the connection while you stay in this workspace.");
+        } else if (description.phase === "awaiting-qr") {
+            uiState.pairingDetected = false;
+        }
+
+        renderSessionState(elements, description);
+        renderSessionProgress(elements, description);
+        renderRecipientDirectory(elements, response.data.session);
+        renderFormEnhancements(elements);
+
+        uiState.previousDescription = description;
+        scheduleSessionRefresh(elements, sessionAccess, description);
+    } finally {
+        uiState.isRefreshingSession = false;
+    }
 }
 
 /**
@@ -557,10 +758,13 @@ function initSchedulerPage() {
 
     hydrateFormDefaults(elements, activeSessionAccess.sessionId);
     bindInteractiveFormHelpers(elements);
-    loadSessionState(elements, activeSessionAccess);
-    globalThis.setInterval(function() {
-        loadSessionState(elements, activeSessionAccess);
-    }, SESSION_REFRESH_INTERVAL_MS);
+    renderSessionProgress(elements);
+    void refreshSessionState(elements, activeSessionAccess);
+
+    elements.sessionCheckNow?.addEventListener("click", function() {
+        setFeedback(elements.formFeedback, "info", "Checking session status now...");
+        void refreshSessionState(elements, activeSessionAccess, { force: true });
+    });
 
     elements.form.addEventListener("submit", function(event) {
         submitSchedule(event, elements, activeSessionAccess);

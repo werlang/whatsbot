@@ -119,6 +119,21 @@
                         <p class="session-card__meta" id="session-client-info" data-role="session-client-info" hidden></p>
                     </div>
 
+                    <section class="session-progress" data-role="session-progress" aria-live="polite">
+                        <div class="session-progress__header">
+                            <p class="session-progress__eyebrow" data-role="session-progress-eyebrow">Waiting to start</p>
+                            <p class="session-progress__meta" data-role="session-progress-meta">Create a session to begin pairing.</p>
+                        </div>
+                        <p class="session-progress__body" data-role="session-progress-body">This page checks pairing automatically and opens your workspace as soon as WhatsApp finishes connecting.</p>
+                        <div class="session-progress__bar" aria-hidden="true">
+                            <span class="session-progress__fill" data-role="session-progress-fill"></span>
+                        </div>
+                        <div class="session-progress__actions">
+                            <button class="button button--ghost" data-role="session-check-now" type="button">Check now</button>
+                            <button class="button button--secondary" data-role="session-reload" type="button">Reload page</button>
+                        </div>
+                    </section>
+
                 <figure class="qr-panel" id="session-qr-panel" data-role="session-qr-panel" hidden>
                     <img id="session-qr-image" data-role="session-qr-image" alt="WhatsApp QR code for pairing this login session">
                     <figcaption>Scan to pair.</figcaption>

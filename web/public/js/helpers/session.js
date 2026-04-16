@@ -49,19 +49,23 @@ export function describeSession(session = {}, locale) {
     let label = "Checking status";
     let tone = "info";
     let note = "You can still schedule future messages while the session finishes connecting.";
+    let phase = "starting";
 
     if (session.ready) {
         label = "Ready";
         tone = "success";
         note = "WhatsApp is connected and scheduled messages can be delivered when they become due.";
+        phase = "ready";
     } else if (session.hasQrCode) {
         label = "Pairing required";
         tone = "warning";
         note = "Scan the QR code below with WhatsApp to finish pairing. You can still schedule future messages now.";
+        phase = "awaiting-qr";
     } else if (lastError) {
         label = "Connection error";
         tone = "danger";
         note = lastError;
+        phase = "error";
     } else if (status) {
         const statusLabels = {
             idle: "Starting",
@@ -74,15 +78,24 @@ export function describeSession(session = {}, locale) {
         label = statusLabels[status] || humanizeSessionToken(status);
         if (status === "disconnected") {
             tone = "warning";
+            phase = "disconnected";
+        } else if (status === "authenticating") {
+            phase = "connecting";
         }
     }
 
     if (!session.ready && session.authenticated && !session.hasQrCode && !lastError) {
         note = "WhatsApp is authenticated and still connecting. You can keep scheduling future messages in the meantime.";
+        phase = "connecting";
     }
 
     if (!session.ready && disconnectReason && !lastError) {
         note = "Session disconnected: " + humanizeSessionToken(disconnectReason) + ". You can still queue future messages.";
+        phase = "disconnected";
+    }
+
+    if (!session.ready && !session.hasQrCode && !lastError && phase === "starting" && connectionState) {
+        phase = connectionState === "CONNECTED" ? "connecting" : phase;
     }
 
     let connection = "Waiting for session details.";
@@ -114,6 +127,7 @@ export function describeSession(session = {}, locale) {
     }
 
     return {
+        phase,
         label,
         tone,
         note,
