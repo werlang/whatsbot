@@ -124,19 +124,19 @@ function renderRecipientDirectory(elements, session) {
     }
 
     if (!session?.ready) {
-        elements.recipientDirectoryStatus.textContent = "Pair this session to load your WhatsApp contacts and groups. You can still type a number manually.";
+        elements.recipientDirectoryStatus.textContent = "Pair to load contacts. Or type a number.";
         return;
     }
 
     if (totalRecipients === 0) {
-        elements.recipientDirectoryStatus.textContent = "No synced contacts or groups were found yet. You can still type a number manually.";
+        elements.recipientDirectoryStatus.textContent = "No contacts yet. You can still type a number.";
         return;
     }
 
     const contactsLabel = formatRecipientCount(directory.contacts.length, "contact");
     const groupsLabel = formatRecipientCount(directory.groups.length, "group");
 
-    elements.recipientDirectoryStatus.textContent = `Synced ${contactsLabel} and ${groupsLabel}. Start typing a name, number, or group, or enter a number manually.`;
+    elements.recipientDirectoryStatus.textContent = `Synced ${contactsLabel} and ${groupsLabel}. Start typing, or enter a number.`;
 }
 
 /**
@@ -166,10 +166,10 @@ function renderRecipientAutocomplete(elements, entries, { sessionReady = false, 
 
     elements.recipientEntry.disabled = totalRecipients === 0;
     elements.recipientEntry.placeholder = totalRecipients > 0
-        ? "Start typing a name, number, or group"
+        ? "Start typing"
         : (sessionReady
-            ? "No synced contacts or groups found yet"
-            : "Pair this session to load contacts and groups");
+            ? "No contacts found yet"
+            : "Pair to load contacts");
 
     if (previousValue && elements.recipientLabelByValue.has(previousValue)) {
         elements.recipientEntry.value = elements.recipientLabelByValue.get(previousValue);
@@ -270,12 +270,12 @@ function renderSchedulePreview(elements) {
     const message = String(elements.message?.value ?? "").trim();
 
     if (!recipient && !scheduledFor && !message) {
-        elements.schedulePreview.textContent = "Preview appears here.";
+        elements.schedulePreview.textContent = "Fill the form.";
         return;
     }
 
     if (!recipient || !scheduledFor || !message) {
-        elements.schedulePreview.textContent = "Complete the fields to preview.";
+        elements.schedulePreview.textContent = "Add the missing details.";
         return;
     }
 
@@ -283,7 +283,7 @@ function renderSchedulePreview(elements) {
         ? `${message.slice(0, 107)}...`
         : message;
 
-    elements.schedulePreview.textContent = `Sends "${previewMessage}" to ${recipient} on ${scheduledFor} (${timezone}).`;
+    elements.schedulePreview.textContent = `${scheduledFor}: "${previewMessage}" to ${recipient} (${timezone}).`;
 }
 
 /**
@@ -456,7 +456,7 @@ function getSessionRefreshInterval(description = {}) {
 function formatRefreshCountdown(targetTimestamp) {
     const remainingMs = Math.max(0, Number(targetTimestamp) - Date.now());
     const remainingSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
-    return `Checking again in ${remainingSeconds}s.`;
+    return `Checks again in ${remainingSeconds}s.`;
 }
 
 /**
@@ -470,8 +470,8 @@ function updateSessionProgressMeta(elements) {
     const uiState = elements.uiState;
     if (!uiState.nextRefreshAt) {
         elements.sessionProgressMeta.textContent = uiState.lastRefreshAt
-            ? "Use Check now if you want an immediate refresh."
-            : "Loading the latest WhatsApp state.";
+            ? "Use Check for an instant refresh."
+            : "Loading status.";
         return;
     }
 
@@ -533,31 +533,31 @@ function renderSessionProgress(elements, description = {}) {
     }
 
     const uiState = elements.uiState;
-    let eyebrow = "Preparing workspace";
-    let body = "This workspace keeps checking the session automatically while you can still prepare or queue future messages.";
+    let eyebrow = "Starting";
+    let body = "We keep this updated.";
     let progress = 16;
 
     if (description.phase === "awaiting-qr") {
-        eyebrow = "Waiting for scan";
-        body = "Scan the QR code below with WhatsApp on your phone. You can already write the message and choose the delivery time while this session finishes pairing.";
+        eyebrow = "Scan QR";
+        body = "Scan the code below. You can keep filling the form.";
         progress = 38;
     } else if (description.phase === "connecting") {
-        eyebrow = uiState.pairingDetected ? "Scan detected" : "Finishing setup";
+        eyebrow = uiState.pairingDetected ? "Scan found" : "Connecting";
         body = uiState.pairingDetected
-            ? "The QR scan was detected. WhatsApp is finishing the connection now. Keep this page open and the session tools will update automatically."
-            : "WhatsApp accepted the session and is still loading chats. You can keep preparing messages while we continue checking.";
+            ? "Scan received. Finishing setup now."
+            : "WhatsApp is still connecting.";
         progress = 74;
     } else if (description.phase === "ready") {
         eyebrow = "Session ready";
-        body = "WhatsApp is connected. Contacts, groups, and scheduled deliveries should now work normally.";
+        body = "WhatsApp is connected.";
         progress = 100;
     } else if (description.phase === "disconnected") {
-        eyebrow = "Connection interrupted";
-        body = "This session disconnected. Wait for a fresh QR code, or use Pair another phone if you need to restart the pairing flow.";
+        eyebrow = "Scan again";
+        body = "This session disconnected. Wait for a new QR code.";
         progress = 24;
     } else if (description.phase === "error") {
-        eyebrow = "Need attention";
-        body = "The session could not be refreshed right now. Use Check now to retry, or reopen the pairing page if the problem continues.";
+        eyebrow = "Check needed";
+        body = "Could not refresh the session. Check again or pair again.";
         progress = 20;
     }
 

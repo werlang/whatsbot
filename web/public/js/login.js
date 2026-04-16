@@ -174,7 +174,7 @@ function openSessionSecretDialog(elements, recoveryPassword) {
     }
 
     elements.sessionSecretValue.textContent = recoveryPassword;
-    setSessionSecretStatus(elements, "Copy and save this recovery password.", "info");
+    setSessionSecretStatus(elements, "Copy and save this code.", "info");
 
     if (typeof elements.sessionSecretDialog.showModal === "function") {
         elements.sessionSecretDialog.showModal();
@@ -282,7 +282,7 @@ function renderSessionState(elements, sessionId, description) {
 function formatCountdownLabel(targetTimestamp) {
     const remainingMs = Math.max(0, Number(targetTimestamp) - Date.now());
     const remainingSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
-    return `Checking again in ${remainingSeconds}s.`;
+    return `Checks again in ${remainingSeconds}s.`;
 }
 
 /**
@@ -308,35 +308,35 @@ function renderPairingGuidance(elements, description = {}, uiState, { hasSession
         return;
     }
 
-    let eyebrow = "Waiting to start";
-    let body = "Create a session to begin pairing. This page checks automatically and opens your workspace when WhatsApp is ready.";
+    let eyebrow = "Waiting";
+    let body = "Create a session. We check automatically.";
     let progress = 8;
 
     if (description.phase === "awaiting-qr") {
-        eyebrow = "Waiting for scan";
-        body = "Open WhatsApp on your phone and scan the QR code shown below. Keep this page open while we watch for the scan.";
+        eyebrow = "Scan QR";
+        body = "Open WhatsApp on your phone and scan the code below.";
         progress = 38;
     } else if (description.phase === "connecting") {
-        eyebrow = uiState.pairingDetected ? "Scan detected" : "Finishing setup";
+        eyebrow = uiState.pairingDetected ? "Scan found" : "Connecting";
         body = uiState.pairingDetected
-            ? "The QR scan was detected. WhatsApp is finishing the connection now. Wait here and this page will open your workspace automatically."
-            : "WhatsApp accepted the session and is still finishing setup. Wait a few seconds while we keep checking.";
+            ? "Scan received. Finishing setup now."
+            : "WhatsApp is finishing setup.";
         progress = 74;
     } else if (description.phase === "ready") {
         eyebrow = "Connected";
-        body = "Pairing is complete. Opening your workspace now.";
+        body = "Opening your workspace now.";
         progress = 100;
     } else if (description.phase === "disconnected") {
-        eyebrow = "Need another scan";
-        body = "The session disconnected before it finished connecting. Wait for a fresh QR code or reload this page if nothing changes.";
+        eyebrow = "Scan again";
+        body = "Waiting for a fresh QR code.";
         progress = 28;
     } else if (description.phase === "error") {
-        eyebrow = "Need attention";
-        body = "WhatsApp reported a connection problem. Use Check now to retry, or reload the page if the status stays the same.";
+        eyebrow = "Check needed";
+        body = "Connection problem. Check again or reload.";
         progress = 20;
     } else if (hasSession) {
-        eyebrow = "Preparing session";
-        body = "The session exists and WhatsApp is still starting. Wait here and we will keep checking for the next pairing step.";
+        eyebrow = "Starting";
+        body = "The session is starting.";
         progress = 18;
     }
 
@@ -364,19 +364,19 @@ function updatePairingGuidanceMeta(elements, uiState, { hasSession = false, isRe
     }
 
     if (!hasSession) {
-        elements.sessionProgressMeta.textContent = "Create a session to begin pairing.";
+        elements.sessionProgressMeta.textContent = "Create a session.";
         return;
     }
 
     if (isReady) {
-        elements.sessionProgressMeta.textContent = "Redirecting automatically.";
+        elements.sessionProgressMeta.textContent = "Redirecting.";
         return;
     }
 
     if (!uiState.nextRefreshAt) {
         elements.sessionProgressMeta.textContent = uiState.lastRefreshAt
-            ? "Check now if you want to refresh immediately."
-            : "Waiting for the first session update.";
+            ? "Use Check for an instant refresh."
+            : "Waiting for the first update.";
         return;
     }
 

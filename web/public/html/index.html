@@ -29,32 +29,20 @@
             </div>
         </header>
 
-        <section class="hero hero--split">
+        <section class="hero hero--compact">
             <div class="hero__content">
                 <span class="hero__eyebrow">WhatsBot</span>
                 <h1>{{heading}}</h1>
                 <p class="hero__lede">{{intro}}</p>
             </div>
-
-            <aside class="hero__aside" aria-label="Quick scheduling context">
-                <div class="hero-card">
-                    <p class="hero-card__eyebrow">Timezone</p>
-                    <p class="hero-card__value" data-role="timezone-label">Loading timezone...</p>
-                </div>
-
-                <div class="hero-card">
-                    <p class="hero-card__eyebrow">Session</p>
-                    <p class="hero-card__value">Ready when your phone is.</p>
-                </div>
-            </aside>
         </section>
 
         <div class="content-grid">
             <section class="panel panel--form" aria-labelledby="scheduler-title">
                 <div class="panel__header">
                     <div>
-                        <span class="panel__kicker">Message</span>
-                        <h2 id="scheduler-title">Schedule message</h2>
+                        <span class="panel__kicker">New</span>
+                        <h2 id="scheduler-title">Message</h2>
                     </div>
                 </div>
 
@@ -63,13 +51,13 @@
                 <form class="form" id="schedule-form">
                     <section class="form__section" aria-labelledby="recipient-section-title">
                         <div class="field-heading">
-                            <h3 id="recipient-section-title">Who should receive it?</h3>
+                            <h3 id="recipient-section-title">To</h3>
                         </div>
 
                         <div class="form__split">
                             <label class="form__field" for="recipient-entry">
-                                <span>Pick contact or group</span>
-                                <input id="recipient-entry" name="recipientEntry" type="search" autocomplete="off" list="recipient-directory" placeholder="Pair this session to load contacts and groups." aria-describedby="recipient-directory-status">
+                                <span>Contact or group</span>
+                                <input id="recipient-entry" name="recipientEntry" type="search" autocomplete="off" list="recipient-directory" placeholder="Contacts load after pairing." aria-describedby="recipient-directory-status">
                                 <datalist id="recipient-directory"></datalist>
                                 <input id="recipient-picker" name="recipient" type="hidden" value="">
                             </label>
@@ -80,12 +68,12 @@
                             </label>
                         </div>
 
-                        <p class="form__hint" id="recipient-directory-status">Contacts appear after pairing.</p>
+                        <p class="form__hint" id="recipient-directory-status">Or type a number.</p>
                     </section>
 
                     <section class="form__section" aria-labelledby="message-section-title">
                         <div class="field-heading">
-                            <h3 id="message-section-title">What should it say?</h3>
+                            <h3 id="message-section-title">Message</h3>
                         </div>
 
                         <label class="form__field" for="message">
@@ -100,31 +88,31 @@
 
                     <section class="form__section" aria-labelledby="time-section-title">
                         <div class="field-heading">
-                            <h3 id="time-section-title">When should it arrive?</h3>
+                            <h3 id="time-section-title">When</h3>
                         </div>
 
                         <div class="preset-row" aria-label="Quick time presets">
-                            <button class="chip" type="button" data-role="schedule-preset" data-preset="15-minutes">In 15 min</button>
-                            <button class="chip" type="button" data-role="schedule-preset" data-preset="tonight">Tonight 18:00</button>
+                            <button class="chip" type="button" data-role="schedule-preset" data-preset="15-minutes">15 min</button>
+                            <button class="chip" type="button" data-role="schedule-preset" data-preset="tonight">18:00</button>
                             <button class="chip" type="button" data-role="schedule-preset" data-preset="tomorrow-morning">Tomorrow 09:00</button>
                         </div>
 
                         <label class="form__field" for="scheduled-for">
-                            <span>Scheduled for</span>
+                            <span>Time</span>
                             <input id="scheduled-for" name="scheduledFor" type="datetime-local" step="60" required>
                         </label>
 
                         <div class="form__meta-row form__meta-row--stacked">
-                            <p class="form__hint"><strong data-role="timezone-label">Loading timezone...</strong></p>
+                            <p class="form__hint">Local time: <strong data-role="timezone-label">Loading timezone...</strong></p>
                         </div>
                     </section>
 
                     <section class="preview-card" aria-live="polite">
-                        <p class="preview-card__eyebrow">Preview</p>
-                        <p class="preview-card__text" data-role="schedule-preview">Preview appears here.</p>
+                        <p class="preview-card__eyebrow">Summary</p>
+                        <p class="preview-card__text" data-role="schedule-preview">Fill the form.</p>
                     </section>
 
-                    <button class="button button--primary" id="schedule-submit" type="submit">Schedule message</button>
+                    <button class="button button--primary" id="schedule-submit" type="submit">Schedule</button>
                 </form>
             </section>
 
@@ -132,8 +120,8 @@
                 <aside class="panel panel--session" aria-labelledby="session-title">
                     <div class="panel__header">
                         <div>
-                            <span class="panel__kicker">Session</span>
-                            <h2 id="session-title">WhatsApp session</h2>
+                            <span class="panel__kicker">Status</span>
+                            <h2 id="session-title">Connection</h2>
                         </div>
                     </div>
 
@@ -142,8 +130,8 @@
                             <span>Status</span>
                             <strong id="session-status" data-role="session-status">Checking status...</strong>
                         </p>
-                        <p class="session-card__meta" id="session-connection" data-role="session-connection">Waiting for session details.</p>
-                        <p class="session-card__note" id="session-note" data-role="session-note">Messages can be queued before pairing finishes.</p>
+                        <p class="session-card__meta" id="session-connection" data-role="session-connection">Checking WhatsApp.</p>
+                        <p class="session-card__note" id="session-note" data-role="session-note">You can schedule before pairing finishes.</p>
                         <p class="session-card__meta" id="session-last-event" data-role="session-last-event" hidden></p>
                         <p class="session-card__meta" id="session-client-info" data-role="session-client-info" hidden></p>
                     </div>
@@ -151,21 +139,21 @@
                     <section class="session-progress" data-role="session-progress" aria-live="polite">
                         <div class="session-progress__header">
                             <p class="session-progress__eyebrow" data-role="session-progress-eyebrow">Checking session</p>
-                            <p class="session-progress__meta" data-role="session-progress-meta">Loading the latest WhatsApp state.</p>
+                            <p class="session-progress__meta" data-role="session-progress-meta">Loading status.</p>
                         </div>
-                        <p class="session-progress__body" data-role="session-progress-body">This workspace keeps checking the session automatically while you can still prepare or queue future messages.</p>
+                        <p class="session-progress__body" data-role="session-progress-body">We keep this updated.</p>
                         <div class="session-progress__bar" aria-hidden="true">
                             <span class="session-progress__fill" data-role="session-progress-fill"></span>
                         </div>
                         <div class="session-progress__actions">
-                            <button class="button button--ghost" data-role="session-check-now" type="button">Check now</button>
-                            <a class="button button--secondary" href="/login">Pair another phone</a>
+                            <button class="button button--ghost" data-role="session-check-now" type="button">Check</button>
+                            <a class="button button--secondary" href="/login">Pair phone</a>
                         </div>
                     </section>
 
                     <figure class="qr-panel" id="session-qr-panel" data-role="session-qr-panel" hidden>
                         <img id="session-qr-image" data-role="session-qr-image" alt="WhatsApp QR code for pairing this scheduler session">
-                        <figcaption>Scan to pair.</figcaption>
+                        <figcaption>Scan in WhatsApp.</figcaption>
                     </figure>
                 </aside>
             </div>

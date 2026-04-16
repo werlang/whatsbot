@@ -30,9 +30,9 @@ test("GET / renders the routing gateway", async () => {
         const body = await response.text();
 
         assert.equal(response.status, 200);
-        assert.match(body, /Routing session/);
+        assert.match(body, /Opening\.\.\./);
         assert.match(body, /js\/root\.js/);
-        assert.match(body, /Open \/login/);
+        assert.match(body, /Open login/);
     } finally {
         await stopTestServer(server);
     }
@@ -47,17 +47,17 @@ test("GET /session/main renders the scheduler UI shell", async () => {
         const body = await response.text();
 
         assert.equal(response.status, 200);
-        assert.match(body, /Schedule one WhatsApp message\./);
+        assert.match(body, /Schedule a message\./);
         assert.match(body, /id="schedule-form"/);
         assert.match(body, /id="recipient-picker"/);
         assert.match(body, /id="phone-number"/);
         assert.match(body, /id="message"/);
         assert.match(body, /id="scheduled-for"/);
-        assert.match(body, /WhatsApp session/);
+        assert.match(body, /Connection/);
         assert.match(body, /id="session-status"/);
         assert.match(body, /data-role="session-progress-body"/);
         assert.match(body, /data-role="session-check-now"/);
-        assert.match(body, /Schedule message/);
+        assert.match(body, /Schedule/);
     } finally {
         await stopTestServer(server);
     }
@@ -72,14 +72,14 @@ test("GET /login renders the session pairing flow", async () => {
         const body = await response.text();
 
         assert.equal(response.status, 200);
-        assert.match(body, /Create one WhatsApp app session\./);
+        assert.match(body, /Connect WhatsApp\./);
         assert.match(body, /id="create-session-button"/);
         assert.match(body, /id="existing-session-password"/);
         assert.match(body, /id="login-existing-session-button"/);
         assert.match(body, /id="session-secret-dialog"/);
         assert.match(body, /data-role="session-secret-send-now"/);
-        assert.match(body, /Copy the recovery password now/);
-        assert.match(body, /Pairing status/);
+        assert.match(body, /Save this code/);
+        assert.match(body, /Connection/);
         assert.match(body, /id="session-status"/);
         assert.match(body, /data-role="session-check-now"/);
         assert.match(body, /data-role="session-progress-body"/);

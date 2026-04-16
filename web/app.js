@@ -51,8 +51,8 @@ function createApp() {
             metaTitle: 'WhatsBot · Scheduled WhatsApp delivery',
             metaDescription: 'Schedule one WhatsApp message.',
             canonicalPath: `/session/${sessionId || 'main'}`,
-            heading: 'Schedule one WhatsApp message.',
-            intro: 'Choose the recipient, write the message, and pick the time.',
+            heading: 'Schedule a message.',
+            intro: 'Pick who, what, and when.',
             schedulerHint: 'Local time. Simple flow.',
             sessionHint: 'Live session status.',
             sessionId: sessionId || 'main',
@@ -67,8 +67,8 @@ function createApp() {
             metaTitle: 'WhatsBot · Login',
             metaDescription: 'Create or restore one WhatsApp session.',
             canonicalPath: '/login',
-            heading: 'Create one WhatsApp app session.',
-            intro: 'Create a session or restore one with a saved password.',
+            heading: 'Connect WhatsApp.',
+            intro: 'New phone or saved code.',
         });
     });
 
