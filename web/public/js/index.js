@@ -13,7 +13,12 @@ import {
     resolveScheduledMessageTarget,
 } from "./helpers/recipient.js";
 import { describeSession } from "./helpers/session.js";
-import { resolveActiveSessionId } from "./helpers/session-id.js";
+import {
+    buildSessionAccessHeaders,
+    clearStoredSessionAccess,
+    readSessionIdFromUrl,
+    readStoredSessionAccess,
+} from "./helpers/session-id.js";
 
 const SESSION_REFRESH_INTERVAL_MS = 15000;
 
@@ -37,8 +42,11 @@ function createElements() {
         sessionClientInfo: document.querySelector("#session-client-info"),
         sessionQrPanel: document.querySelector("#session-qr-panel"),
         sessionQrImage: document.querySelector("#session-qr-image"),
-        timezoneLabel: document.querySelector("[data-role=timezone-label]"),
+        schedulePreview: document.querySelector("[data-role=schedule-preview]"),
+        messageCounter: document.querySelector("[data-role=message-counter]"),
+        timezoneLabels: [...document.querySelectorAll("[data-role=timezone-label]")],
         activeSessionId: document.querySelector("[data-role=active-session-id]"),
+        schedulePresetButtons: [...document.querySelectorAll("[data-role=schedule-preset]")],
         year: document.querySelector("[data-role=year]"),
     };
 }
@@ -143,6 +151,161 @@ function appendRecipientGroup(select, label, entries) {
 }
 
 /**
+ * Formats one datetime-local value into concise preview text.
+ */
+function formatScheduledPreview(value) {
+    const normalizedValue = String(value ?? "").trim();
+    if (!normalizedValue) {
+        return "";
+    }
+
+    const localDate = new Date(normalizedValue);
+    if (Number.isNaN(localDate.getTime())) {
+        return "";
+    }
+
+    return new Intl.DateTimeFormat(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+    }).format(localDate);
+}
+
+/**
+ * Returns a friendly recipient label for the live preview.
+ */
+function readPreviewRecipient(elements) {
+    const selectedOption = elements.recipientPicker?.selectedOptions?.[0] || null;
+    const selectedValue = elements.recipientPicker?.value || "";
+    if (selectedOption && selectedValue) {
+        return selectedOption.textContent.trim();
+    }
+
+    const phoneNumber = String(elements.phoneNumber?.value ?? "").trim();
+    if (phoneNumber) {
+        return phoneNumber;
+    }
+
+    return "";
+}
+
+/**
+ * Updates the character counter beside the message field.
+ */
+function renderMessageCounter(elements) {
+    if (!elements.messageCounter) {
+        return;
+    }
+
+    const length = String(elements.message?.value ?? "").trim().length;
+    elements.messageCounter.textContent = `${length} character${length === 1 ? "" : "s"}`;
+}
+
+/**
+ * Renders one non-technical delivery preview.
+ */
+function renderSchedulePreview(elements) {
+    if (!elements.schedulePreview) {
+        return;
+    }
+
+    const recipient = readPreviewRecipient(elements);
+    const scheduledFor = formatScheduledPreview(elements.scheduledFor?.value);
+    const timezone = elements.timezoneLabels[0]?.textContent?.trim() || getCurrentTimezoneLabel();
+    const message = String(elements.message?.value ?? "").trim();
+
+    if (!recipient && !scheduledFor && !message) {
+        elements.schedulePreview.textContent = "Preview appears here.";
+        return;
+    }
+
+    if (!recipient || !scheduledFor || !message) {
+        elements.schedulePreview.textContent = "Complete the fields to preview.";
+        return;
+    }
+
+    const previewMessage = message.length > 110
+        ? `${message.slice(0, 107)}...`
+        : message;
+
+    elements.schedulePreview.textContent = `Sends "${previewMessage}" to ${recipient} on ${scheduledFor} (${timezone}).`;
+}
+
+/**
+ * Updates the live helper text around the form.
+ */
+function renderFormEnhancements(elements) {
+    renderMessageCounter(elements);
+    renderSchedulePreview(elements);
+}
+
+/**
+ * Computes one datetime-local value from a quick preset id.
+ */
+function buildPresetDateTimeValue(preset) {
+    const now = new Date();
+    const scheduled = new Date(now.getTime());
+
+    if (preset === "15-minutes") {
+        scheduled.setSeconds(0, 0);
+        scheduled.setMinutes(scheduled.getMinutes() + 15);
+        return toDateTimeLocalValue(scheduled);
+    }
+
+    if (preset === "tonight") {
+        scheduled.setHours(18, 0, 0, 0);
+        if (scheduled.getTime() <= now.getTime()) {
+            scheduled.setDate(scheduled.getDate() + 1);
+        }
+        return toDateTimeLocalValue(scheduled);
+    }
+
+    if (preset === "tomorrow-morning") {
+        scheduled.setDate(scheduled.getDate() + 1);
+        scheduled.setHours(9, 0, 0, 0);
+        return toDateTimeLocalValue(scheduled);
+    }
+
+    return "";
+}
+
+/**
+ * Marks the active quick preset button for the current time choice.
+ */
+function setActivePreset(elements, activePreset) {
+    for (const button of elements.schedulePresetButtons) {
+        button.dataset.active = button.dataset.preset === activePreset ? "true" : "false";
+    }
+}
+
+/**
+ * Wires up live preview interactions on the scheduler form.
+ */
+function bindInteractiveFormHelpers(elements) {
+    const rerender = function() {
+        setActivePreset(elements, "");
+        renderFormEnhancements(elements);
+    };
+
+    elements.recipientPicker?.addEventListener("change", rerender);
+    elements.phoneNumber?.addEventListener("input", rerender);
+    elements.message?.addEventListener("input", renderFormEnhancements.bind(null, elements));
+    elements.scheduledFor?.addEventListener("input", rerender);
+
+    for (const button of elements.schedulePresetButtons) {
+        button.addEventListener("click", function() {
+            const nextValue = buildPresetDateTimeValue(button.dataset.preset || "");
+            if (!elements.scheduledFor || !nextValue) {
+                return;
+            }
+
+            elements.scheduledFor.value = nextValue;
+            setActivePreset(elements, button.dataset.preset || "");
+            renderFormEnhancements(elements);
+        });
+    }
+}
+
+/**
  * Applies the initial browser-local scheduling hints.
  */
 function hydrateFormDefaults(elements, sessionId) {
@@ -154,8 +317,11 @@ function hydrateFormDefaults(elements, sessionId) {
         elements.activeSessionId.textContent = sessionId;
     }
 
-    if (elements.timezoneLabel) {
-        elements.timezoneLabel.textContent = getCurrentTimezoneLabel();
+    if (elements.timezoneLabels.length > 0) {
+        const timezoneLabel = getCurrentTimezoneLabel();
+        for (const node of elements.timezoneLabels) {
+            node.textContent = timezoneLabel;
+        }
     }
 
     if (elements.scheduledFor) {
@@ -164,6 +330,8 @@ function hydrateFormDefaults(elements, sessionId) {
             elements.scheduledFor.value = createDefaultScheduledDateTime();
         }
     }
+
+    renderFormEnhancements(elements);
 }
 
 /**
@@ -199,14 +367,31 @@ function renderSessionState(elements, description) {
 
     if (elements.sessionQrImage && description.showQr) {
         elements.sessionQrImage.src = description.qrCodeDataUrl;
+    } else if (elements.sessionQrImage) {
+        elements.sessionQrImage.removeAttribute("src");
     }
 }
 
 /**
  * Loads the latest WhatsApp session state from the API.
  */
-async function loadSessionState(elements, sessionId) {
-    const response = await requestApi(`/whatsapp/session?sessionId=${encodeURIComponent(sessionId)}`);
+async function loadSessionState(elements, sessionAccess) {
+    const response = await requestApi(`/whatsapp/session?sessionId=${encodeURIComponent(sessionAccess.sessionId)}`, {
+        headers: buildSessionAccessHeaders(sessionAccess.accessPassword),
+    });
+
+    console.debug("[WhatsBot] Scheduler session refresh", {
+        sessionId: sessionAccess.sessionId,
+        ok: response.ok,
+        session: response.data?.session || null,
+    });
+
+    if (response.status === 401) {
+        clearStoredSessionAccess();
+        globalThis.location.replace("/login");
+        return;
+    }
+
     if (!response.ok || !response.data || !response.data.session) {
         renderSessionState(elements, {
             label: "Unavailable",
@@ -224,12 +409,13 @@ async function loadSessionState(elements, sessionId) {
 
     renderSessionState(elements, describeSession(response.data.session));
     renderRecipientDirectory(elements, response.data.session);
+    renderFormEnhancements(elements);
 }
 
 /**
  * Schedules one message through POST /messages.
  */
-async function submitSchedule(event, elements, sessionId) {
+async function submitSchedule(event, elements, sessionAccess) {
     event.preventDefault();
 
     if (!elements.form || !elements.submitButton) {
@@ -246,18 +432,31 @@ async function submitSchedule(event, elements, sessionId) {
         });
         const response = await requestApi("/messages", {
             method: "POST",
+            headers: buildSessionAccessHeaders(sessionAccess.accessPassword),
             body: {
-                sessionId,
+                sessionId: sessionAccess.sessionId,
                 ...targetPayload,
                 message: elements.message?.value.trim(),
                 scheduledFor: convertDateTimeLocalToOffsetIso(elements.scheduledFor?.value),
             },
         });
 
+        if (response.status === 401) {
+            clearStoredSessionAccess();
+            globalThis.location.replace("/login");
+            return;
+        }
+
         if (!response.ok) {
             setFeedback(elements.formFeedback, "danger", readResponseMessage(response, "Could not schedule the WhatsApp message."));
             return;
         }
+
+        console.debug("[WhatsBot] Message scheduled", {
+            sessionId: sessionAccess.sessionId,
+            targetPayload,
+            scheduledMessage: response.data?.scheduledMessage || null,
+        });
 
         const scheduledMessage = response.data && response.data.scheduledMessage ? response.data.scheduledMessage : null;
         let successMessage = "Message scheduled successfully.";
@@ -273,6 +472,8 @@ async function submitSchedule(event, elements, sessionId) {
         if (elements.scheduledFor) {
             elements.scheduledFor.value = createDefaultScheduledDateTime();
         }
+        setActivePreset(elements, "");
+        renderFormEnhancements(elements);
     } catch (error) {
         setFeedback(
             elements.formFeedback,
@@ -295,16 +496,28 @@ function initSchedulerPage() {
         return;
     }
 
-    const activeSessionId = resolveActiveSessionId();
+    const routeSessionId = readSessionIdFromUrl();
+    const activeSessionAccess = readStoredSessionAccess();
 
-    hydrateFormDefaults(elements, activeSessionId);
-    loadSessionState(elements, activeSessionId);
+    if (!activeSessionAccess.sessionId || !activeSessionAccess.accessPassword) {
+        globalThis.location.replace("/login");
+        return;
+    }
+
+    if (!routeSessionId || routeSessionId !== activeSessionAccess.sessionId) {
+        globalThis.location.replace(`/session/${encodeURIComponent(activeSessionAccess.sessionId)}`);
+        return;
+    }
+
+    hydrateFormDefaults(elements, activeSessionAccess.sessionId);
+    bindInteractiveFormHelpers(elements);
+    loadSessionState(elements, activeSessionAccess);
     globalThis.setInterval(function() {
-        loadSessionState(elements, activeSessionId);
+        loadSessionState(elements, activeSessionAccess);
     }, SESSION_REFRESH_INTERVAL_MS);
 
     elements.form.addEventListener("submit", function(event) {
-        submitSchedule(event, elements, activeSessionId);
+        submitSchedule(event, elements, activeSessionAccess);
     });
 }
 

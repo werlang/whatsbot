@@ -12,19 +12,43 @@
 </head>
 
 <body>
-    <main class="page-shell page-shell--gateway">
-        <section class="hero hero--gateway">
-            <span class="hero__eyebrow">WhatsBot</span>
-            <h1>Routing session…</h1>
-            <p>Opening the correct page for this browser.</p>
-            <p class="hero__hint">If you already have a saved session id, WhatsBot will open the scheduler. Otherwise it will send you to the login flow.</p>
-            <p class="hero__hint"><a href="/login">Open /login</a> if you want to create a new session manually.</p>
+    <div class="app-background" aria-hidden="true"></div>
+    <main class="app-shell app-shell--gateway">
+        <header class="app-topbar app-topbar--gateway">
+            <a class="brand" href="/login" aria-label="Open WhatsBot login">
+                <span class="brand__mark">W</span>
+                <span class="brand__text">
+                    <strong>WhatsBot</strong>
+                    <span>WhatsApp scheduling</span>
+                </span>
+            </a>
+        </header>
+
+        <section class="hero hero--split hero--gateway">
+            <div class="hero__content hero__content--gateway">
+                <span class="hero__eyebrow">WhatsBot</span>
+                <h1>Routing session...</h1>
+                <p class="hero__lede">Opening your workspace.</p>
+                <p class="hero__hint"><a href="/login">Open /login</a></p>
+            </div>
+
+            <div class="hero__aside hero__aside--gateway" aria-hidden="true">
+                <div class="hero-card hero-card--pulse">
+                    <p class="hero-card__eyebrow">Please wait</p>
+                    <p class="hero-card__value">Preparing your space</p>
+                </div>
+            </div>
         </section>
 
         <noscript>
             <section class="panel panel--gateway">
-                <p>JavaScript is required to route between the login and session pages.</p>
-                <p><a href="/login">Go to /login</a></p>
+                <div class="panel__header">
+                    <div>
+                        <span class="panel__kicker">JavaScript required</span>
+                        <h2>Open login</h2>
+                    </div>
+                </div>
+                <p><a class="button button--ghost" href="/login">Go to /login</a></p>
             </section>
         </noscript>
     </main>

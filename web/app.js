@@ -36,7 +36,7 @@ function createApp() {
     application.get('/', (req, res) => {
         res.templateRender('root', {
             metaTitle: 'WhatsBot · Redirecting',
-            metaDescription: 'WhatsBot is routing you to the correct session page.',
+            metaDescription: 'WhatsBot is opening your workspace.',
             canonicalPath: '/',
         });
     });
@@ -49,12 +49,12 @@ function createApp() {
 
         res.templateRender('index', {
             metaTitle: 'WhatsBot · Scheduled WhatsApp delivery',
-            metaDescription: 'Schedule one WhatsApp message to a phone number, contact, or group, then monitor the current pairing session and QR status from the same page.',
+            metaDescription: 'Schedule one WhatsApp message.',
             canonicalPath: `/session/${sessionId || 'main'}`,
             heading: 'Schedule one WhatsApp message.',
-            intro: 'Pick a synced contact or group, or type a destination number manually, then choose the local date and time and let the API queue the delivery.',
-            schedulerHint: 'The browser converts your chosen local time into a timezone-aware timestamp before the request is sent to the API.',
-            sessionHint: 'Keep an eye on the live session state below so you know whether WhatsApp is already paired or still waiting for a QR scan.',
+            intro: 'Choose the recipient, write the message, and pick the time.',
+            schedulerHint: 'Local time. Simple flow.',
+            sessionHint: 'Live session status.',
             sessionId: sessionId || 'main',
         });
     });
@@ -65,10 +65,10 @@ function createApp() {
     application.get('/login', (req, res) => {
         res.templateRender('login', {
             metaTitle: 'WhatsBot · Login',
-            metaDescription: 'Create one WhatsApp session, scan the QR code, and pair this app session without opening the scheduler UI.',
+            metaDescription: 'Create or restore one WhatsApp session.',
             canonicalPath: '/login',
             heading: 'Create one WhatsApp app session.',
-            intro: 'Use this page to create and pair an isolated WhatsApp session for one person. Each session can later schedule messages independently.',
+            intro: 'Create a session or restore one with a saved password.',
         });
     });
 

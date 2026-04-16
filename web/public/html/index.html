@@ -12,84 +12,148 @@
 </head>
 
 <body>
-    <main class="page-shell">
-        <section class="hero">
-            <span class="hero__eyebrow">WhatsBot</span>
-            <h1>{{heading}}</h1>
-            <p>{{intro}}</p>
-            <p class="hero__hint">{{schedulerHint}}</p>
-            <p class="hero__hint">Active session: <strong data-role="active-session-id">main</strong>. Need another pairing? <a href="/login">Open /login</a>.</p>
+    <div class="app-background" aria-hidden="true"></div>
+    <main class="app-shell">
+        <header class="app-topbar">
+            <a class="brand" href="/session/{{sessionId}}" aria-label="Open this WhatsBot session">
+                <span class="brand__mark">W</span>
+                <span class="brand__text">
+                    <strong>WhatsBot</strong>
+                    <span>Schedule</span>
+                </span>
+            </a>
+
+            <div class="topbar__actions">
+                <p class="topbar__session">Session <strong data-role="active-session-id">main</strong></p>
+                <a class="button button--ghost" href="/login">Pair another phone</a>
+            </div>
+        </header>
+
+        <section class="hero hero--split">
+            <div class="hero__content">
+                <span class="hero__eyebrow">WhatsBot</span>
+                <h1>{{heading}}</h1>
+                <p class="hero__lede">{{intro}}</p>
+            </div>
+
+            <aside class="hero__aside" aria-label="Quick scheduling context">
+                <div class="hero-card">
+                    <p class="hero-card__eyebrow">Timezone</p>
+                    <p class="hero-card__value" data-role="timezone-label">Loading timezone...</p>
+                </div>
+
+                <div class="hero-card">
+                    <p class="hero-card__eyebrow">Session</p>
+                    <p class="hero-card__value">Ready when your phone is.</p>
+                </div>
+            </aside>
         </section>
 
-        <div class="layout">
+        <div class="content-grid">
             <section class="panel panel--form" aria-labelledby="scheduler-title">
                 <div class="panel__header">
                     <div>
+                        <span class="panel__kicker">Message</span>
                         <h2 id="scheduler-title">Schedule message</h2>
-                        <p>Queue one WhatsApp message for a specific local date and time, either by typing a number or picking a synced contact or group.</p>
                     </div>
                 </div>
 
                 <div class="feedback" id="form-feedback" data-role="form-feedback" hidden aria-live="polite"></div>
 
                 <form class="form" id="schedule-form">
-                    <label class="form__field" for="recipient-picker">
-                        <span>Pick contact or group</span>
-                        <select id="recipient-picker" name="recipient">
-                            <option value="">Pair this session to load contacts and groups.</option>
-                        </select>
-                    </label>
+                    <section class="form__section" aria-labelledby="recipient-section-title">
+                        <div class="field-heading">
+                            <h3 id="recipient-section-title">Who should receive it?</h3>
+                        </div>
 
-                    <p class="form__hint" id="recipient-directory-status">Pair this session to load your WhatsApp contacts and groups. You can still type a number manually.</p>
+                        <div class="form__split">
+                            <label class="form__field" for="recipient-picker">
+                                <span>Pick contact or group</span>
+                                <select id="recipient-picker" name="recipient">
+                                    <option value="">Pair this session to load contacts and groups.</option>
+                                </select>
+                            </label>
 
-                    <label class="form__field" for="phone-number">
-                        <span>Phone number</span>
-                        <input id="phone-number" name="phoneNumber" type="tel" autocomplete="tel" inputmode="tel" placeholder="5551999999999">
-                    </label>
+                            <label class="form__field" for="phone-number">
+                                <span>Phone number</span>
+                                <input id="phone-number" name="phoneNumber" type="tel" autocomplete="tel" inputmode="tel" placeholder="5551999999999">
+                            </label>
+                        </div>
 
-                    <label class="form__field" for="message">
-                        <span>Message</span>
-                        <textarea id="message" name="message" rows="6" placeholder="Hello! This is your scheduled reminder." required></textarea>
-                    </label>
+                        <p class="form__hint" id="recipient-directory-status">Contacts appear after pairing.</p>
+                    </section>
 
-                    <label class="form__field" for="scheduled-for">
-                        <span>Scheduled for</span>
-                        <input id="scheduled-for" name="scheduledFor" type="datetime-local" step="60" required>
-                    </label>
+                    <section class="form__section" aria-labelledby="message-section-title">
+                        <div class="field-heading">
+                            <h3 id="message-section-title">What should it say?</h3>
+                        </div>
 
-                    <p class="form__hint">Timezone used for scheduling: <strong data-role="timezone-label">Loading timezone…</strong></p>
-                    <p class="form__hint form__hint--muted">Messages can still be queued even while the WhatsApp session is waiting for pairing. Group messages require picking a synced group above.</p>
+                        <label class="form__field" for="message">
+                            <span>Message</span>
+                            <textarea id="message" name="message" rows="6" placeholder="Hello! This is your scheduled reminder." required></textarea>
+                        </label>
 
-                    <button class="button" id="schedule-submit" type="submit">Schedule message</button>
+                        <div class="form__meta-row">
+                            <p class="form__caption" data-role="message-counter">0 characters</p>
+                        </div>
+                    </section>
+
+                    <section class="form__section" aria-labelledby="time-section-title">
+                        <div class="field-heading">
+                            <h3 id="time-section-title">When should it arrive?</h3>
+                        </div>
+
+                        <div class="preset-row" aria-label="Quick time presets">
+                            <button class="chip" type="button" data-role="schedule-preset" data-preset="15-minutes">In 15 min</button>
+                            <button class="chip" type="button" data-role="schedule-preset" data-preset="tonight">Tonight 18:00</button>
+                            <button class="chip" type="button" data-role="schedule-preset" data-preset="tomorrow-morning">Tomorrow 09:00</button>
+                        </div>
+
+                        <label class="form__field" for="scheduled-for">
+                            <span>Scheduled for</span>
+                            <input id="scheduled-for" name="scheduledFor" type="datetime-local" step="60" required>
+                        </label>
+
+                        <div class="form__meta-row form__meta-row--stacked">
+                            <p class="form__hint"><strong data-role="timezone-label">Loading timezone...</strong></p>
+                        </div>
+                    </section>
+
+                    <section class="preview-card" aria-live="polite">
+                        <p class="preview-card__eyebrow">Preview</p>
+                        <p class="preview-card__text" data-role="schedule-preview">Preview appears here.</p>
+                    </section>
+
+                    <button class="button button--primary" id="schedule-submit" type="submit">Schedule message</button>
                 </form>
             </section>
 
-            <aside class="panel panel--session" aria-labelledby="session-title">
-                <div class="panel__header">
-                    <div>
-                        <h2 id="session-title">WhatsApp session</h2>
-                        <p>{{sessionHint}}</p>
+            <div class="panel-stack">
+                <aside class="panel panel--session" aria-labelledby="session-title">
+                    <div class="panel__header">
+                        <div>
+                            <span class="panel__kicker">Session</span>
+                            <h2 id="session-title">WhatsApp session</h2>
+                        </div>
                     </div>
-                </div>
 
-                <div class="session-card">
-                    <p class="session-card__status">
-                        <span>Status</span>
-                        <strong id="session-status" data-role="session-status">Checking status…</strong>
-                    </p>
-                    <p class="session-card__meta" id="session-connection" data-role="session-connection">Waiting for session details.</p>
-                    <p class="session-card__note" id="session-note" data-role="session-note">You can still schedule future messages while the session finishes connecting.</p>
-                    <p class="session-card__meta" id="session-last-event" data-role="session-last-event" hidden></p>
-                    <p class="session-card__meta" id="session-client-info" data-role="session-client-info" hidden></p>
-                </div>
+                    <div class="session-card">
+                        <p class="session-card__status">
+                            <span>Status</span>
+                            <strong id="session-status" data-role="session-status">Checking status...</strong>
+                        </p>
+                        <p class="session-card__meta" id="session-connection" data-role="session-connection">Waiting for session details.</p>
+                        <p class="session-card__note" id="session-note" data-role="session-note">Messages can be queued before pairing finishes.</p>
+                        <p class="session-card__meta" id="session-last-event" data-role="session-last-event" hidden></p>
+                        <p class="session-card__meta" id="session-client-info" data-role="session-client-info" hidden></p>
+                    </div>
 
-                <figure class="qr-panel" id="session-qr-panel" data-role="session-qr-panel" hidden>
-                    <img id="session-qr-image" data-role="session-qr-image" alt="WhatsApp QR code for pairing this scheduler session">
-                    <figcaption>Scan this QR code with WhatsApp on your phone to pair the scheduler session.</figcaption>
-                </figure>
-
-                <p class="session-card__meta">API base URL: <code>{{apiUrl}}</code></p>
-            </aside>
+                    <figure class="qr-panel" id="session-qr-panel" data-role="session-qr-panel" hidden>
+                        <img id="session-qr-image" data-role="session-qr-image" alt="WhatsApp QR code for pairing this scheduler session">
+                        <figcaption>Scan to pair.</figcaption>
+                    </figure>
+                </aside>
+            </div>
         </div>
 
         <p class="footer-note">&copy; <span data-role="year">{{year}}</span> {{siteName}}</p>

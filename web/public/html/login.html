@@ -12,72 +12,133 @@
 </head>
 
 <body>
-    <main class="page-shell">
-        <section class="hero">
-            <span class="hero__eyebrow">WhatsBot Login</span>
-            <h1>{{heading}}</h1>
-            <p>{{intro}}</p>
-            <p class="hero__hint">Each session created here uses its own WhatsApp Web pairing and can schedule commands independently.</p>
+    <div class="app-background" aria-hidden="true"></div>
+    <main class="app-shell">
+        <header class="app-topbar">
+            <a class="brand" href="/login" aria-label="Open WhatsBot login">
+                <span class="brand__mark">W</span>
+                <span class="brand__text">
+                    <strong>WhatsBot</strong>
+                    <span>Pair a session</span>
+                </span>
+            </a>
+
+            <div class="topbar__actions">
+                <a class="button button--ghost" href="/session/main">Scheduler</a>
+            </div>
+        </header>
+
+        <section class="hero hero--split">
+            <div class="hero__content">
+                <span class="hero__eyebrow">WhatsBot Login</span>
+                <h1>{{heading}}</h1>
+                <p class="hero__lede">{{intro}}</p>
+            </div>
+
+            <aside class="hero__aside" aria-label="Pairing reassurance">
+                <div class="hero-card">
+                    <p class="hero-card__eyebrow">3 steps</p>
+                    <p class="hero-card__value">Create. Copy. Scan.</p>
+                </div>
+            </aside>
         </section>
 
-        <div class="layout">
+        <div class="content-grid">
             <section class="panel panel--form" aria-labelledby="login-title">
                 <div class="panel__header">
                     <div>
+                        <span class="panel__kicker">Session</span>
                         <h2 id="login-title">Create session</h2>
-                        <p>Generate one session id, copy it as the password, then pair it by scanning the QR code from your phone.</p>
                     </div>
                 </div>
 
                 <div class="feedback" id="login-feedback" data-role="login-feedback" hidden aria-live="polite"></div>
 
-                <p class="form__hint">Refreshing this page with the same session path reopens the same session view.</p>
+                <div class="step-list" aria-label="Pairing checklist">
+                    <article class="step-list__item" data-step="create">
+                        <p class="step-list__eyebrow">1</p>
+                        <div>
+                            <h3>Create session</h3>
+                        </div>
+                    </article>
+
+                    <article class="step-list__item" data-step="copy">
+                        <p class="step-list__eyebrow">2</p>
+                        <div>
+                            <h3>Copy the password</h3>
+                        </div>
+                    </article>
+
+                    <article class="step-list__item" data-step="scan">
+                        <p class="step-list__eyebrow">3</p>
+                        <div>
+                            <h3>Scan the QR code</h3>
+                        </div>
+                    </article>
+                </div>
+
                 <p class="form__hint form__hint--muted" data-role="session-id-panel" hidden>Active session: <strong data-role="session-id">-</strong></p>
 
-                <button class="button" id="create-session-button" type="button">Create WhatsApp session</button>
-                <p class="form__hint form__hint--muted">After pairing, messages sent to your own chat with <code>@whatsbot</code> can create scheduled deliveries for this session.</p>
+                <button class="button button--primary button--wide" id="create-session-button" type="button">New session</button>
+
+                <section class="form__section" aria-labelledby="restore-session-title">
+                    <div class="field-heading">
+                        <h3 id="restore-session-title">Use a saved password</h3>
+                    </div>
+
+                    <form class="form" id="login-existing-session-form">
+                        <label class="form__field" for="existing-session-password">
+                            <span>Password</span>
+                            <input id="existing-session-password" type="password" autocomplete="one-time-code" placeholder="Paste password">
+                        </label>
+
+                        <button class="button button--ghost button--wide" id="login-existing-session-button" type="submit">Restore session</button>
+                    </form>
+                </section>
+
+                <p class="form__caption"><code>@whatsbot</code> commands work after pairing.</p>
             </section>
 
-            <aside class="panel panel--session" aria-labelledby="session-title">
-                <div class="panel__header">
-                    <div>
-                        <h2 id="session-title">Pairing status</h2>
-                        <p>Watch the QR and connection state for the active session.</p>
+            <div class="panel-stack">
+                <aside class="panel panel--session" aria-labelledby="session-title">
+                    <div class="panel__header">
+                        <div>
+                            <span class="panel__kicker">Status</span>
+                            <h2 id="session-title">Pairing status</h2>
+                        </div>
                     </div>
-                </div>
 
-                <div class="session-card">
-                    <p class="session-card__status">
-                        <span>Status</span>
-                        <strong id="session-status" data-role="session-status">Waiting for session creation…</strong>
-                    </p>
-                    <p class="session-card__meta" id="session-connection" data-role="session-connection">Create a session to start pairing WhatsApp Web.</p>
-                    <p class="session-card__note" id="session-note" data-role="session-note">Once this session is ready, self-messages beginning with <code>@whatsbot</code> will be interpreted as scheduling commands.</p>
-                    <p class="session-card__meta" id="session-last-event" data-role="session-last-event" hidden></p>
-                    <p class="session-card__meta" id="session-client-info" data-role="session-client-info" hidden></p>
-                </div>
+                    <div class="session-card">
+                        <p class="session-card__status">
+                            <span>Status</span>
+                            <strong id="session-status" data-role="session-status">Waiting for session creation...</strong>
+                        </p>
+                        <p class="session-card__meta" id="session-connection" data-role="session-connection">Create a session to start pairing WhatsApp Web.</p>
+                        <p class="session-card__note" id="session-note" data-role="session-note">Commands are available after pairing.</p>
+                        <p class="session-card__meta" id="session-last-event" data-role="session-last-event" hidden></p>
+                        <p class="session-card__meta" id="session-client-info" data-role="session-client-info" hidden></p>
+                    </div>
 
                 <figure class="qr-panel" id="session-qr-panel" data-role="session-qr-panel" hidden>
                     <img id="session-qr-image" data-role="session-qr-image" alt="WhatsApp QR code for pairing this login session">
-                    <figcaption>Scan this QR code with WhatsApp on your phone to connect this app session.</figcaption>
+                    <figcaption>Scan to pair.</figcaption>
                 </figure>
 
                 <p class="session-card__meta"><a data-role="scheduler-link" href="/" hidden>Open the scheduler for this session</a></p>
-                <p class="session-card__meta">API base URL: <code>{{apiUrl}}</code></p>
             </aside>
         </div>
 
         <dialog class="session-secret-modal" id="session-secret-dialog" aria-labelledby="session-secret-title">
             <div class="session-secret-modal__card">
                 <p class="session-secret-modal__eyebrow">Session password</p>
-                <h2 class="session-secret-modal__title" id="session-secret-title">Copy the UUID now</h2>
-                <p class="session-secret-modal__body">This UUID is the password for the session you just created. Copy it before closing this dialog.</p>
+                <h2 class="session-secret-modal__title" id="session-secret-title">Copy the password now</h2>
+                <p class="session-secret-modal__body">Save it before closing.</p>
                 <code class="session-secret-modal__value" data-role="session-secret-value"></code>
                 <p class="session-secret-modal__status" data-role="session-secret-status" hidden aria-live="polite"></p>
                 <div class="session-secret-modal__actions">
-                    <button class="button" data-role="session-secret-copy" type="button">Copy UUID</button>
-                    <button class="button button--secondary" data-role="session-secret-send-now" type="button">Send now</button>
-                    <button class="button button--secondary" data-role="session-secret-close" type="button">I copied it</button>
+                    <button class="button" data-role="session-secret-copy" type="button">Copy password</button>
+                    <button class="button button--secondary" data-role="session-secret-send-now" type="button">Open workspace</button>
+                    <button class="button button--secondary" data-role="session-secret-close" type="button">Done</button>
                 </div>
             </div>
         </dialog>

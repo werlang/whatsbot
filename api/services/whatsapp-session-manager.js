@@ -14,8 +14,8 @@ class WhatsAppSessionManager {
         config = appConfig.whatsapp,
         scheduledMessageModel = ScheduledMessage,
         clientFactory,
-        sessionAccessStore = new WhatsAppSessionAccessStore({ authPath: config.authPath, logger }),
         logger = console,
+        sessionAccessStore = new WhatsAppSessionAccessStore({ authPath: config.authPath, logger }),
     } = {}) {
         this.config = config;
         this.logger = logger;

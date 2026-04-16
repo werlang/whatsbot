@@ -25,6 +25,7 @@ async function stopTestServer(server) {
 
 test("GET /whatsapp/session returns the stable session envelope", async () => {
     const whatsappClient = {
+        async assertAuthorizedSession() {},
         async getSessionState() {
             return {
                 sessionId: "main",
@@ -375,28 +376,31 @@ test("POST /whatsapp/sessions creates a new session envelope", async () => {
     const whatsappClient = {
         async createSession() {
             return {
-                sessionId: "alpha",
-                clientId: "alpha",
-                status: "initializing",
-                ready: false,
-                authenticated: false,
-                hasQrCode: false,
-                qrCodeDataUrl: null,
-                qrCodeUpdatedAt: null,
-                connectionState: null,
-                loading: {
-                    percent: 0,
-                    message: null,
+                session: {
+                    sessionId: "alpha",
+                    clientId: "alpha",
+                    status: "initializing",
+                    ready: false,
+                    authenticated: false,
+                    hasQrCode: false,
+                    qrCodeDataUrl: null,
+                    qrCodeUpdatedAt: null,
+                    connectionState: null,
+                    loading: {
+                        percent: 0,
+                        message: null,
+                    },
+                    clientInfo: null,
+                    chatDirectory: {
+                        contacts: [],
+                        groups: [],
+                        refreshedAt: null,
+                    },
+                    lastError: null,
+                    lastEventAt: null,
+                    disconnectReason: null,
                 },
-                clientInfo: null,
-                chatDirectory: {
-                    contacts: [],
-                    groups: [],
-                    refreshedAt: null,
-                },
-                lastError: null,
-                lastEventAt: null,
-                disconnectReason: null,
+                accessPassword: "amber-harbor-4821",
             };
         },
         getDefaultSessionId() {
@@ -451,7 +455,103 @@ test("POST /whatsapp/sessions creates a new session envelope", async () => {
         assert.equal(response.status, 201);
         assert.equal(payload.error, false);
         assert.equal(payload.data.session.sessionId, "alpha");
+        assert.equal(payload.data.accessPassword, "amber-harbor-4821");
         assert.equal(payload.message, "WhatsApp session created.");
+    } finally {
+        await stopTestServer(server);
+    }
+});
+
+test("POST /whatsapp/sessions/login restores one session by password", async () => {
+    let receivedPassword = null;
+    const whatsappClient = {
+        async loginWithPassword(password) {
+            receivedPassword = password;
+            return {
+                session: {
+                    sessionId: "alpha",
+                    clientId: "alpha",
+                    status: "ready",
+                    ready: true,
+                    authenticated: true,
+                    hasQrCode: false,
+                    qrCodeDataUrl: null,
+                    qrCodeUpdatedAt: null,
+                    connectionState: "CONNECTED",
+                    loading: {
+                        percent: 100,
+                        message: null,
+                    },
+                    clientInfo: null,
+                    chatDirectory: {
+                        contacts: [],
+                        groups: [],
+                        refreshedAt: null,
+                    },
+                    lastError: null,
+                    lastEventAt: null,
+                    disconnectReason: null,
+                },
+                accessPassword: "amber-harbor-4821",
+            };
+        },
+        getDefaultSessionId() {
+            return "main";
+        },
+        getKnownSessionState() {
+            return { status: "idle" };
+        },
+        getActiveSessionCount() {
+            return 1;
+        },
+        async getSessionState() {
+            return {
+                sessionId: "main",
+                clientId: "main",
+                status: "idle",
+                ready: false,
+                authenticated: false,
+                hasQrCode: false,
+                qrCodeDataUrl: null,
+                qrCodeUpdatedAt: null,
+                connectionState: null,
+                loading: {
+                    percent: 0,
+                    message: null,
+                },
+                clientInfo: null,
+                chatDirectory: {
+                    contacts: [],
+                    groups: [],
+                    refreshedAt: null,
+                },
+                lastError: null,
+                lastEventAt: null,
+                disconnectReason: null,
+            };
+        },
+    };
+    const server = await startTestServer({ whatsappClient });
+    const { port } = server.address();
+
+    try {
+        const response = await fetch(`http://127.0.0.1:${port}/whatsapp/sessions/login`, {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+            },
+            body: JSON.stringify({
+                password: "amber-harbor-4821",
+            }),
+        });
+        const payload = await response.json();
+
+        assert.equal(response.status, 200);
+        assert.equal(receivedPassword, "amber-harbor-4821");
+        assert.equal(payload.error, false);
+        assert.equal(payload.data.session.sessionId, "alpha");
+        assert.equal(payload.data.accessPassword, "amber-harbor-4821");
+        assert.equal(payload.message, "WhatsApp session restored.");
     } finally {
         await stopTestServer(server);
     }

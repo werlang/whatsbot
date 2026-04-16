@@ -62,13 +62,14 @@ The `scheduled_datetime` token currently uses the API runtime local timezone and
 The web service uses:
 
 - Express 5 + Mustache SSR
-- a scheduler page at `/`
-- a dedicated login and pairing page at `/session/:id` with `/login` kept as a redirect
+- a browser gateway at `/` that redirects to `/login` or `/session/:id`
+- a dedicated login and pairing page at `/login`
+- a session-specific scheduler page at `/session/:id`
 - direct static assets from `web/public/css` and `web/public/js`
 - browser-side polling of `GET /whatsapp/session` or `GET /whatsapp/sessions/:sessionId`
 - browser-side submission to `POST /messages`
 
-The browser converts `datetime-local` input into a timezone-aware ISO timestamp before posting to the API. The active scheduler session is taken from the `sessionId` query string or browser storage.
+The browser converts `datetime-local` input into a timezone-aware ISO timestamp before posting to the API. The active scheduler session is stored in browser state as a session id plus a user-friendly password, and `/login` can either create a new session or restore an existing one by password.
 
 ## Docker Compose workflow
 
@@ -103,10 +104,12 @@ docker compose -f compose.dev.yaml up --build
 Current development URLs and ports:
 
 - Web: `http://localhost`
-- Web login flow: `http://localhost/session/main`
+- Web login flow: `http://localhost/login`
+- Web scheduler flow after login: `http://localhost/session/<session-id>`
 - API ready check: `http://localhost:3000/ready`
 - API session check: `http://localhost:3000/whatsapp/session`
 - API session creation: `http://localhost:3000/whatsapp/sessions`
+- API session restore: `http://localhost:3000/whatsapp/sessions/login`
 - MySQL host port: `3306`
 - Node inspector: `9229`
 
@@ -127,11 +130,11 @@ Typical local flow:
   docker compose -f compose.dev.yaml up --build
   ```
 
-2. Open `http://localhost/session/main` to create and pair a session, or `http://localhost` if you already have a session id.
+2. Open `http://localhost` to let the gateway route you, or go directly to `http://localhost/login` to create a new session or paste an existing password.
 
-3. Wait for the session panel to show a QR code, then scan it with WhatsApp on your phone.
+3. If you create a new session, copy the generated friendly password from the modal, then wait for the session panel to show a QR code and scan it with WhatsApp on your phone.
 
-4. After pairing, use `/?sessionId=<your-session-id>` for session-specific manual scheduling, or send `@whatsbot` commands to your own chat from that same account.
+4. After pairing, the browser returns to `/` and opens `/session/:id` automatically for the active password-backed session, or you can restore the same session later from `/login` by pasting that password.
 
 ## Persistence and runtime caveats
 

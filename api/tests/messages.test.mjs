@@ -41,6 +41,7 @@ test("POST /messages creates one scheduled message with normalized fields", asyn
         },
     };
     const whatsappClient = {
+        async assertAuthorizedSession() {},
         getSessionState() {
             return { status: "idle" };
         },
@@ -78,6 +79,7 @@ test("POST /messages creates one scheduled message with normalized fields", asyn
 
 test("POST /messages accepts an explicit session id", async () => {
     let createdPayload = null;
+    let authorizedPayload = null;
     const scheduledMessageModel = {
         async create(payload) {
             createdPayload = payload;
@@ -98,6 +100,9 @@ test("POST /messages accepts an explicit session id", async () => {
         },
     };
     const whatsappClient = {
+        async assertAuthorizedSession(sessionId, password) {
+            authorizedPayload = { sessionId, password };
+        },
         getDefaultSessionId() {
             return "main";
         },
@@ -116,6 +121,7 @@ test("POST /messages accepts an explicit session id", async () => {
             method: "POST",
             headers: {
                 "content-type": "application/json",
+                "x-whatsbot-session-password": "amber-harbor-4821",
             },
             body: JSON.stringify({
                 sessionId: "sales-team",
@@ -127,6 +133,10 @@ test("POST /messages accepts an explicit session id", async () => {
         const payload = await response.json();
 
         assert.equal(response.status, 201);
+        assert.deepEqual(authorizedPayload, {
+            sessionId: "sales-team",
+            password: "amber-harbor-4821",
+        });
         assert.equal(createdPayload.sessionId, "sales-team");
         assert.equal(createdPayload.targetType, "contact");
         assert.equal(createdPayload.targetValue, "5551999999999");
@@ -158,6 +168,7 @@ test("POST /messages accepts one group target from the scheduler payload", async
         },
     };
     const whatsappClient = {
+        async assertAuthorizedSession() {},
         getDefaultSessionId() {
             return "main";
         },
@@ -200,6 +211,7 @@ test("POST /messages accepts one group target from the scheduler payload", async
 
 test("POST /messages rejects scheduledFor values without timezone information", async () => {
     const whatsappClient = {
+        async assertAuthorizedSession() {},
         getSessionState() {
             return { status: "idle" };
         },
