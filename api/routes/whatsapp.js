@@ -10,14 +10,22 @@ import { whatsappSessionManager as defaultWhatsAppSessionManager } from "../serv
 function createWhatsAppRouter({ whatsappClientManager = defaultWhatsAppSessionManager } = {}) {
     const router = express.Router();
 
+    /**
+     * Reads the session access password from a request header.
+     */
+    function readSessionPassword(req) {
+        return req.get("x-whatsbot-session-password") || "";
+    }
+
     router.post("/sessions", async (req, res, next) => {
         try {
-            const session = await whatsappClientManager.createSession();
+            const { session, accessPassword } = await whatsappClientManager.createSession();
 
             return sendSuccess(res, {
                 status: 201,
                 data: {
                     session,
+                    accessPassword,
                 },
                 message: "WhatsApp session created.",
             });
@@ -28,9 +36,29 @@ function createWhatsAppRouter({ whatsappClientManager = defaultWhatsAppSessionMa
         }
     });
 
+    router.post("/sessions/login", async (req, res, next) => {
+        try {
+            const { session, accessPassword } = await whatsappClientManager.loginWithPassword(req.body?.password);
+
+            return sendSuccess(res, {
+                data: {
+                    session,
+                    accessPassword,
+                },
+                message: "WhatsApp session restored.",
+            });
+        } catch (error) {
+            return next(error instanceof HttpError
+                ? error
+                : new HttpError(500, "Could not restore the WhatsApp session.", error));
+        }
+    });
+
     router.get("/sessions/:sessionId", async (req, res, next) => {
         try {
-            const session = await whatsappClientManager.getSessionState(normalizeSessionId(req.params.sessionId, { required: true }));
+            const sessionId = normalizeSessionId(req.params.sessionId, { required: true });
+            await whatsappClientManager.assertAuthorizedSession(sessionId, readSessionPassword(req));
+            const session = await whatsappClientManager.getSessionState(sessionId);
 
             return sendSuccess(res, {
                 data: {
@@ -50,6 +78,7 @@ function createWhatsAppRouter({ whatsappClientManager = defaultWhatsAppSessionMa
                 req.query.sessionId,
                 { fallback: whatsappClientManager.getDefaultSessionId?.() || "main" },
             );
+            await whatsappClientManager.assertAuthorizedSession(sessionId, readSessionPassword(req));
             const session = await whatsappClientManager.getSessionState(sessionId);
 
             return sendSuccess(res, {

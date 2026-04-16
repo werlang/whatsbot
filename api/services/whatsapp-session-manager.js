@@ -3,6 +3,7 @@ import { appConfig } from "../config/app-config.js";
 import { normalizeSessionId } from "../helpers/session.js";
 import { ScheduledMessage } from "../model/scheduled-message.js";
 import { buildCommandErrorReply, buildScheduledCommandReply, parseWhatsBotCommand } from "./whatsapp-command.js";
+import { WhatsAppSessionAccessStore } from "./whatsapp-session-access-store.js";
 import { WhatsAppClientManager } from "./whatsapp-client-manager.js";
 
 /**
@@ -13,12 +14,14 @@ class WhatsAppSessionManager {
         config = appConfig.whatsapp,
         scheduledMessageModel = ScheduledMessage,
         clientFactory,
+        sessionAccessStore = new WhatsAppSessionAccessStore({ authPath: config.authPath, logger }),
         logger = console,
     } = {}) {
         this.config = config;
         this.logger = logger;
         this.scheduledMessageModel = scheduledMessageModel;
         this.sessions = new Map();
+        this.sessionAccessStore = sessionAccessStore;
         this.clientFactory = clientFactory || (sessionConfig => new WhatsAppClientManager(sessionConfig, {
             logger: this.logger,
             onSelfCommand: command => this.handleSelfCommand(command),
@@ -30,6 +33,7 @@ class WhatsAppSessionManager {
      * Initializes the default session used by the existing scheduler flow.
      */
     async initialize() {
+        await this.sessionAccessStore.initialize();
         await this.ensureSession(this.getDefaultSessionId());
         return this;
     }
@@ -47,7 +51,25 @@ class WhatsAppSessionManager {
     async createSession() {
         const sessionId = normalizeSessionId(crypto.randomUUID());
         const session = await this.ensureSession(sessionId);
-        return this.describeSession(sessionId, session);
+        const access = await this.sessionAccessStore.ensureSessionAccess(sessionId);
+
+        return {
+            session: this.describeSession(sessionId, session),
+            accessPassword: access.accessPassword,
+        };
+    }
+
+    /**
+     * Restores one existing session from its access password.
+     */
+    async loginWithPassword(password) {
+        const access = await this.sessionAccessStore.findByPassword(password);
+        const session = await this.getSessionState(access.sessionId);
+
+        return {
+            session,
+            accessPassword: access.accessPassword,
+        };
     }
 
     /**
@@ -90,6 +112,16 @@ class WhatsAppSessionManager {
         }
 
         return this.describeSession(normalizedSessionId, session);
+    }
+
+    /**
+     * Verifies one session password before a protected session operation.
+     */
+    async assertAuthorizedSession(sessionId, password) {
+        await this.sessionAccessStore.assertSessionAccess(sessionId, password, {
+            allowDefaultSession: true,
+            defaultSessionId: this.getDefaultSessionId(),
+        });
     }
 
     /**

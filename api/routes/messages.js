@@ -5,6 +5,7 @@ import { normalizeMessageTarget } from "../helpers/message-target.js";
 import { sendCreated } from "../helpers/response.js";
 import { normalizeSessionId } from "../helpers/session.js";
 import { ScheduledMessage } from "../model/scheduled-message.js";
+import { whatsappSessionManager as defaultWhatsAppSessionManager } from "../services/whatsapp-session-manager.js";
 
 /**
  * Validates and normalizes the schedule payload accepted by POST /messages.
@@ -29,12 +30,17 @@ function parseScheduledMessagePayload(payload = {}) {
 /**
  * Builds the scheduled-message routes with an injectable persistence model.
  */
-function createMessagesRouter({ scheduledMessageModel = ScheduledMessage } = {}) {
+function createMessagesRouter({
+    scheduledMessageModel = ScheduledMessage,
+    whatsappClientManager = defaultWhatsAppSessionManager,
+} = {}) {
     const router = express.Router();
 
     router.post("/", async (req, res, next) => {
         try {
-            const scheduledMessage = await scheduledMessageModel.create(parseScheduledMessagePayload(req.body));
+            const payload = parseScheduledMessagePayload(req.body);
+            await whatsappClientManager.assertAuthorizedSession(payload.sessionId, req.get("x-whatsbot-session-password") || "");
+            const scheduledMessage = await scheduledMessageModel.create(payload);
             return sendCreated(res, {
                 data: { scheduledMessage },
                 message: "Scheduled message created.",

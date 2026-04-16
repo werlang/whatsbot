@@ -27,7 +27,10 @@ function createApp({
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
 
-    app.use('/messages', createMessagesRouter({ scheduledMessageModel }));
+    app.use('/messages', createMessagesRouter({
+        scheduledMessageModel,
+        whatsappClientManager: whatsappClient,
+    }));
     app.use('/whatsapp', createWhatsAppRouter({ whatsappClientManager: whatsappClient }));
 
     app.get('/ready', (req, res) => {

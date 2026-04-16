@@ -1,12 +1,12 @@
-import { readStoredSessionId } from "./helpers/session-id.js";
+import { readStoredSessionAccess } from "./helpers/session-id.js";
 
 /**
  * Redirects the browser to the right entry point.
  */
 function initRootGateway() {
-    const sessionId = readStoredSessionId();
-    const targetPath = sessionId
-        ? `/session/${encodeURIComponent(sessionId)}`
+    const sessionAccess = readStoredSessionAccess();
+    const targetPath = sessionAccess.sessionId && sessionAccess.accessPassword
+        ? `/session/${encodeURIComponent(sessionAccess.sessionId)}`
         : "/login";
 
     globalThis.location.replace(targetPath);
