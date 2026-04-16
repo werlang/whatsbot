@@ -10,6 +10,9 @@ services:
             - mysql
         volumes:
             - whatsapp_auth:/whatsapp/auth
+        networks:
+            - whatsbot
+            - default
 
     web:
         build: ./web
@@ -20,7 +23,9 @@ services:
         command: npm run production
         depends_on:
             - api
-
+        networks:
+            - whatsbot
+            - default
     mysql:
         image: mysql:8.2
         restart: unless-stopped
@@ -29,15 +34,13 @@ services:
             MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
         volumes:
             - mysql:/var/lib/mysql
-    tunnel:
-        image: cloudflare/cloudflared
-        restart: unless-stopped
-        command: tunnel --no-autoupdate run
-        environment:
-            - TUNNEL_TOKEN=${CLOUDFLARE_TOKEN}
-            - TUNNEL_METRICS=0.0.0.0:60123
-        env_file:
-            - .env
+        networks:
+            - default
 volumes:
     mysql:
     whatsapp_auth:
+networks:
+    whatsbot:
+        name: whatsbot
+    default:
+        name: default
