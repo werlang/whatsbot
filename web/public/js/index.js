@@ -527,8 +527,10 @@ function buildPresetDateTimeValue(preset) {
     }
 
     if (preset === "tomorrow-morning") {
-        scheduled.setDate(scheduled.getDate() + 1);
         scheduled.setHours(9, 0, 0, 0);
+        if (scheduled.getTime() <= now.getTime()) {
+            scheduled.setDate(scheduled.getDate() + 1);
+        }
         return toDateTimeLocalValue(scheduled);
     }
 
