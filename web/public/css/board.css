@@ -1,0 +1,240 @@
+/*
+ * The board: the one bold element. The next message to leave, set as a departure row:
+ * departure time, recipient, a hairlined track that fills toward the send, and a countdown.
+ * Always a graphite band in both themes; sodium is reserved for time.
+ */
+
+.board {
+    --progress: 0;
+
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+        "time countdown"
+        "route route"
+        "track track";
+    align-items: center;
+    column-gap: var(--space-4);
+    row-gap: var(--space-2);
+    padding: var(--space-3) var(--space-4) var(--space-3);
+    background: var(--color-board);
+    color: var(--color-board-ink);
+    color-scheme: dark;
+    position: sticky;
+    inset-block-start: 0;
+    z-index: var(--z-sticky);
+
+    @media (min-width: 1024px) {
+        position: static;
+        grid-template-columns: auto auto minmax(12rem, 26rem) minmax(6rem, 1fr) auto;
+        grid-template-areas: "label time route track countdown";
+        column-gap: var(--space-6);
+        padding: var(--space-4) var(--space-6);
+    }
+}
+
+.board__label {
+    grid-area: label;
+    display: none;
+    font-family: var(--font-board);
+    font-stretch: 87.5%;
+    font-size: var(--text-2xs);
+    font-weight: 500;
+    letter-spacing: var(--tracking-label);
+    text-transform: uppercase;
+    color: var(--color-board-muted);
+    writing-mode: vertical-rl;
+    rotate: 180deg;
+
+    @media (min-width: 1024px) {
+        display: block;
+    }
+}
+
+.board__time {
+    grid-area: time;
+    display: grid;
+    gap: var(--space-1);
+    font-family: var(--font-board);
+    font-variant-numeric: tabular-nums slashed-zero;
+
+    time {
+        font-size: var(--text-xl);
+        font-stretch: 75%;
+        font-weight: 500;
+        line-height: 1;
+        letter-spacing: -0.01em;
+
+        @media (min-width: 1024px) {
+            font-size: var(--text-board);
+        }
+    }
+}
+
+.board__day {
+    font-size: var(--text-2xs);
+    font-stretch: 87.5%;
+    letter-spacing: var(--tracking-label);
+    text-transform: uppercase;
+    color: var(--color-board-muted);
+    white-space: nowrap;
+}
+
+.board__route {
+    grid-area: route;
+    display: grid;
+    gap: 2px;
+    min-inline-size: 0;
+}
+
+.board__to {
+    overflow: clip;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-board);
+    font-stretch: 87.5%;
+    font-size: var(--text-sm);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+
+.board__message {
+    overflow: clip;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--text-sm);
+    color: var(--color-board-muted);
+}
+
+/* The track: a hairline with minute ticks, filled in sodium up to now. */
+.board__track {
+    grid-area: track;
+    position: relative;
+    block-size: 0.75rem;
+    background:
+        linear-gradient(var(--color-board-rule), var(--color-board-rule)) center / 100% 1px no-repeat,
+        repeating-linear-gradient(90deg, var(--color-board-rule) 0 1px, transparent 1px 10%) center / 100% 7px no-repeat;
+}
+
+.board__track-fill {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    inline-size: calc(var(--progress) * 100%);
+    background: linear-gradient(var(--color-time-board), var(--color-time-board)) center / 100% 2px no-repeat;
+
+    &::after {
+        content: "";
+        position: absolute;
+        inset-inline-end: -5px;
+        inset-block-start: 50%;
+        inline-size: 10px;
+        block-size: 10px;
+        margin-block-start: -5px;
+        border-radius: 50%;
+        background: var(--color-time-board);
+        box-shadow: 0 0 0 3px var(--color-board);
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+        transition: inline-size 1s linear;
+    }
+}
+
+.board__countdown {
+    grid-area: countdown;
+    display: grid;
+    justify-items: end;
+    gap: var(--space-1);
+}
+
+.board__countdown-label {
+    font-family: var(--font-board);
+    font-stretch: 87.5%;
+    font-size: var(--text-2xs);
+    letter-spacing: var(--tracking-label);
+    text-transform: uppercase;
+    color: var(--color-board-muted);
+    white-space: nowrap;
+}
+
+.board__digits {
+    display: flex;
+    font-family: var(--font-board);
+    font-size: var(--text-board);
+    font-stretch: 75%;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums slashed-zero;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: var(--color-time-board);
+
+    @media (min-width: 1024px) {
+        font-size: var(--text-board-lg);
+    }
+}
+
+/* One cell per character so a changing digit can turn over on its own. */
+.board__digit {
+    display: inline-block;
+    overflow: clip;
+    min-inline-size: 0.5ch;
+    text-align: center;
+}
+
+.board__digit-face {
+    display: inline-block;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .board__digit.is-turning .board__digit-face {
+        animation: digit-turn 320ms var(--ease-out);
+    }
+}
+
+@keyframes digit-turn {
+    from {
+        translate: 0 -55%;
+        opacity: 0;
+        filter: blur(2px);
+    }
+
+    to {
+        translate: 0 0;
+        opacity: 1;
+        filter: blur(0);
+    }
+}
+
+.board[data-state="empty"] {
+    .board__time time,
+    .board__digits {
+        color: var(--color-board-muted);
+    }
+
+    .board__track-fill {
+        display: none;
+    }
+}
+
+.board[data-state="due"] {
+    .board__digits {
+        color: var(--color-time-board);
+    }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .board[data-state="due"] .board__track-fill::after {
+        animation: due-pulse 1.2s var(--ease-out) infinite;
+    }
+}
+
+@keyframes due-pulse {
+    0%, 100% {
+        box-shadow: 0 0 0 3px var(--color-board), 0 0 0 3px rgb(from var(--color-time-board) r g b / 0.6);
+    }
+
+    70% {
+        box-shadow: 0 0 0 3px var(--color-board), 0 0 0 10px rgb(from var(--color-time-board) r g b / 0);
+    }
+}

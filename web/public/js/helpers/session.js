@@ -45,6 +45,11 @@ export function describeSession(session = {}, locale) {
     const status = normalizeText(session.status);
     const connectionState = normalizeText(session.connectionState);
     const disconnectReason = normalizeText(session.disconnectReason);
+    const needsQrCode = Boolean(session.needsQrCode);
+    const reconnectAttempt = Number.isFinite(Number(session.reconnectAttempt)) && Number(session.reconnectAttempt) > 0
+        ? Number(session.reconnectAttempt)
+        : 0;
+    const nextReconnectAt = normalizeText(session.nextReconnectAt);
 
     let label = "Checking status";
     let tone = "info";
@@ -61,6 +66,13 @@ export function describeSession(session = {}, locale) {
         tone = "warning";
         note = "Scan the QR code below with WhatsApp to finish pairing. You can still schedule future messages now.";
         phase = "awaiting-qr";
+    } else if (needsQrCode) {
+        label = "New QR required";
+        tone = "danger";
+        note = lastError
+            ? `${lastError} Pair again to generate a new QR code.`
+            : "WhatsApp authentication expired. Pair again to generate a new QR code.";
+        phase = "needs-qr";
     } else if (lastError) {
         label = "Connection error";
         tone = "danger";
@@ -84,28 +96,30 @@ export function describeSession(session = {}, locale) {
         }
     }
 
-    if (!session.ready && session.authenticated && !session.hasQrCode && !lastError) {
+    if (!session.ready && session.authenticated && !session.hasQrCode && !lastError && !needsQrCode) {
         note = "WhatsApp is authenticated and still connecting. You can keep scheduling future messages in the meantime.";
         phase = "connecting";
     }
 
-    if (!session.ready && disconnectReason && !lastError) {
-        note = "Session disconnected: " + humanizeSessionToken(disconnectReason) + ". You can still queue future messages.";
+    if (!session.ready && disconnectReason && !lastError && !needsQrCode) {
+        note = "Session disconnected (" + humanizeSessionToken(disconnectReason) + "). Scheduled messages stay queued while it reconnects.";
         phase = "disconnected";
     }
 
-    if (!session.ready && !session.hasQrCode && !lastError && phase === "starting" && connectionState) {
+    if (!session.ready && !session.hasQrCode && !lastError && !needsQrCode && phase === "starting" && connectionState) {
         phase = connectionState === "CONNECTED" ? "connecting" : phase;
     }
 
     let connection = "Waiting for session details.";
-    if (loading && Number.isFinite(loading.percent)) {
+    if (loading && Number.isFinite(loading.percent) && !needsQrCode && phase !== "disconnected") {
         connection = "Loading " + loading.percent + "%";
         if (normalizeText(loading.message)) {
             connection += " · " + normalizeText(loading.message);
         }
     } else if (connectionState) {
-        connection = "Connection: " + humanizeSessionToken(connectionState);
+        connection = humanizeSessionToken(connectionState);
+    } else if (phase === "disconnected" && disconnectReason) {
+        connection = "Disconnected · " + humanizeSessionToken(disconnectReason);
     }
 
     let clientLabel = "";
@@ -122,7 +136,7 @@ export function describeSession(session = {}, locale) {
             parts.push(wid);
         }
         if (parts.length > 0) {
-            clientLabel = "Connected account: " + parts.join(" · ");
+            clientLabel = parts.join(" · ");
         }
     }
 
@@ -138,5 +152,8 @@ export function describeSession(session = {}, locale) {
             ? "Last update: " + formatSessionTimestamp(session.lastEventAt, locale)
             : "",
         clientLabel,
+        needsQrCode,
+        reconnectAttempt,
+        nextReconnectAt,
     };
 }

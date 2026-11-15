@@ -26,6 +26,8 @@ function createElements() {
         feedback: document.querySelector("#login-feedback"),
         sessionSecretDialog: document.querySelector("#session-secret-dialog"),
         sessionSecretValue: document.querySelector("[data-role=session-secret-value]"),
+        sessionSecretSessionId: document.querySelector("[data-role=session-secret-session-id]"),
+        sessionSecretToken: document.querySelector("[data-role=session-secret-token]"),
         sessionSecretCopy: document.querySelector("[data-role=session-secret-copy]"),
         sessionSecretSendNow: document.querySelector("[data-role=session-secret-send-now]"),
         sessionSecretClose: document.querySelector("[data-role=session-secret-close]"),
@@ -33,6 +35,7 @@ function createElements() {
         sessionStatus: document.querySelector("#session-status"),
         sessionConnection: document.querySelector("#session-connection"),
         sessionNote: document.querySelector("#session-note"),
+        sessionReconnect: document.querySelector("#session-reconnect"),
         sessionLastEvent: document.querySelector("#session-last-event"),
         sessionClientInfo: document.querySelector("#session-client-info"),
         sessionQrPanel: document.querySelector("#session-qr-panel"),
@@ -66,6 +69,8 @@ function createLoginUiState() {
         pairingDetected: false,
         redirectScheduled: false,
         redirectTimerId: 0,
+        reconnectAttempt: 0,
+        nextReconnectAt: "",
     };
 }
 
@@ -166,14 +171,27 @@ function readRecoveryPasswordFromResponse(response) {
 }
 
 /**
- * Shows the password modal with one new recovery password.
+ * Shows the password modal with one new recovery password and session access details.
  */
-function openSessionSecretDialog(elements, recoveryPassword) {
+function openSessionSecretDialog(elements, recoveryPassword, sessionAccess = null) {
     if (!elements.sessionSecretDialog || !elements.sessionSecretValue) {
         return;
     }
 
     elements.sessionSecretValue.textContent = recoveryPassword;
+
+    if (elements.sessionSecretSessionId) {
+        const sid = sessionAccess?.sessionId || "";
+        elements.sessionSecretSessionId.hidden = !sid;
+        elements.sessionSecretSessionId.textContent = sid;
+    }
+
+    if (elements.sessionSecretToken) {
+        const token = sessionAccess?.accessToken || "";
+        elements.sessionSecretToken.hidden = !token;
+        elements.sessionSecretToken.textContent = token;
+    }
+
     setSessionSecretStatus(elements, "Copy and save this code.", "info");
 
     if (typeof elements.sessionSecretDialog.showModal === "function") {
@@ -220,10 +238,41 @@ function openSchedulerForSession(sessionAccess, { replace = false } = {}) {
     globalThis.location.assign("/");
 }
 
+function formatReconnectLine(reconnectAttempt, nextReconnectAt) {
+    const parts = [];
+    if (reconnectAttempt > 0) {
+        parts.push(`Attempt ${reconnectAttempt}`);
+    }
+    if (nextReconnectAt) {
+        const targetMs = new Date(nextReconnectAt).getTime();
+        if (Number.isFinite(targetMs)) {
+            const secs = Math.max(0, Math.ceil((targetMs - Date.now()) / 1000));
+            parts.push(secs > 0 ? `retrying in ${secs}s` : "retrying now");
+        }
+    }
+    return parts.join(" · ");
+}
+
+function updateReconnectFact(elements, uiState) {
+    if (!elements.sessionReconnect || !uiState) {
+        return;
+    }
+
+    const line = formatReconnectLine(uiState.reconnectAttempt, uiState.nextReconnectAt);
+    elements.sessionReconnect.hidden = !line;
+    elements.sessionReconnect.textContent = line;
+}
+
 /**
  * Applies one session description to the login page.
  */
-function renderSessionState(elements, sessionId, description) {
+function renderSessionState(elements, sessionId, description, uiState = null) {
+    if (uiState) {
+        uiState.reconnectAttempt = Number(description.reconnectAttempt || 0);
+        uiState.nextReconnectAt = description.nextReconnectAt || "";
+        updateReconnectFact(elements, uiState);
+    }
+
     if (elements.sessionStatus) {
         elements.sessionStatus.textContent = description.label;
         elements.sessionStatus.dataset.tone = description.tone;
@@ -326,9 +375,15 @@ function renderPairingGuidance(elements, description = {}, uiState, { hasSession
         eyebrow = "Connected";
         body = "Opening your workspace now.";
         progress = 100;
+    } else if (description.phase === "needs-qr") {
+        eyebrow = "New QR required";
+        body = "Authentication expired or failed. Create a new session to pair again.";
+        progress = 12;
     } else if (description.phase === "disconnected") {
-        eyebrow = "Scan again";
-        body = "Waiting for a fresh QR code.";
+        eyebrow = "Connection dropped";
+        body = description.reconnectAttempt > 0
+            ? `Reconnecting automatically (attempt ${description.reconnectAttempt}).`
+            : "Waiting for a fresh QR code.";
         progress = 28;
     } else if (description.phase === "error") {
         eyebrow = "Check needed";
@@ -349,7 +404,7 @@ function renderPairingGuidance(elements, description = {}, uiState, { hasSession
     }
 
     if (elements.sessionProgressFill) {
-        elements.sessionProgressFill.style.width = `${progress}%`;
+        elements.sessionProgressFill.style.inlineSize = `${progress}%`;
     }
 
     updatePairingGuidanceMeta(elements, uiState, { hasSession, isReady: description.phase === "ready" });
@@ -400,6 +455,7 @@ function startGuidanceCountdown(elements, uiState, options = {}) {
 
     uiState.countdownTimerId = globalThis.setInterval(function() {
         updatePairingGuidanceMeta(elements, uiState, options);
+        updateReconnectFact(elements, uiState);
 
         if (Date.now() >= uiState.nextRefreshAt) {
             globalThis.clearInterval(uiState.countdownTimerId);
@@ -467,7 +523,7 @@ async function refreshSessionState(elements, sessionAccess, uiState, { redirectW
     uiState.lastRefreshAt = Date.now();
 
     try {
-        const session = await loadSessionState(elements, sessionAccess, { redirectWhenReady: false });
+        const session = await loadSessionState(elements, sessionAccess, { redirectWhenReady: false, uiState });
         if (!session) {
             clearSessionRefresh(uiState);
             renderPairingGuidance(elements, {}, uiState, { hasSession: true });
@@ -506,7 +562,7 @@ async function refreshSessionState(elements, sessionAccess, uiState, { redirectW
 /**
  * Loads one session state from the API using the session token.
  */
-async function loadSessionState(elements, sessionAccess, { redirectWhenReady = true } = {}) {
+async function loadSessionState(elements, sessionAccess, { redirectWhenReady = true, uiState = null } = {}) {
     if (!sessionAccess?.sessionId || !sessionAccess?.accessToken) {
         return null;
     }
@@ -533,7 +589,7 @@ async function loadSessionState(elements, sessionAccess, { redirectWhenReady = t
     }
 
     const description = describeSession(response.data.session);
-    renderSessionState(elements, sessionAccess.sessionId, description);
+    renderSessionState(elements, sessionAccess.sessionId, description, uiState);
     renderOnboardingSteps(elements, sessionAccess, description);
 
     if (redirectWhenReady && response.data.session.ready) {
@@ -573,7 +629,7 @@ async function createSession(elements) {
         });
 
         persistPendingSessionAccess(sessionAccess);
-        openSessionSecretDialog(elements, recoveryPassword);
+        openSessionSecretDialog(elements, recoveryPassword, sessionAccess);
         setFeedback(elements.feedback, "success", "Session created. Copy the recovery password, then scan the QR code.");
         if (elements.existingPasswordInput) {
             elements.existingPasswordInput.value = "";
