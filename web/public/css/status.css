@@ -1,0 +1,128 @@
+/*
+ * Status vocabulary shared by the queue, the session chip and inline feedback.
+ * Every state pairs a colour with an icon shape and a word: colour never works alone.
+ * Tones: time (pending, due), success (sent, ready), danger (failed, error),
+ * warning (needs action), info (neutral progress).
+ */
+
+.status-mark {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-family: var(--font-board);
+    font-stretch: 87.5%;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-ink-soft);
+    white-space: nowrap;
+
+    .icon {
+        inline-size: 1rem;
+        block-size: 1rem;
+    }
+
+    &[data-tone="time"] {
+        color: var(--color-time);
+    }
+
+    &[data-tone="success"] {
+        color: var(--color-sent);
+    }
+
+    &[data-tone="danger"] {
+        color: var(--color-failed);
+    }
+}
+
+/* Session state chip: a lamp and a word. */
+.state-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-block-size: 2rem;
+    padding: 0 var(--space-3);
+    border: var(--hairline) solid var(--color-rule);
+    border-radius: 999px;
+    background: var(--color-sheet);
+    font-size: var(--text-sm);
+    white-space: nowrap;
+
+    strong {
+        font-weight: 600;
+    }
+}
+
+.lamp {
+    position: relative;
+    inline-size: 0.5rem;
+    block-size: 0.5rem;
+    flex: none;
+    border-radius: 50%;
+    background: var(--color-ink-muted);
+
+    .state-chip:has([data-tone="success"]) & {
+        background: var(--color-sent);
+    }
+
+    .state-chip:has([data-tone="danger"]) & {
+        background: var(--color-failed);
+    }
+
+    .state-chip:has([data-tone="warning"]) & {
+        background: var(--color-time-fill);
+    }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .state-chip:has([data-tone="warning"]) .lamp,
+    .state-chip:has([data-tone="info"]) .lamp {
+        animation: lamp-pulse 1.6s var(--ease-out) infinite;
+    }
+}
+
+@keyframes lamp-pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.35;
+    }
+}
+
+/* Inline feedback: one line, one job. */
+.feedback {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-md);
+    background: var(--color-sheet-raised);
+    border: var(--hairline) solid var(--color-rule);
+    font-size: var(--text-sm);
+    line-height: var(--leading-snug);
+    color: var(--color-ink-soft);
+
+    &[hidden] {
+        display: none;
+    }
+
+    &[data-tone="success"] {
+        border-color: rgb(from var(--color-sent) r g b / 0.4);
+        background: var(--color-sent-wash);
+        color: var(--color-ink);
+    }
+
+    &[data-tone="danger"] {
+        border-color: rgb(from var(--color-failed) r g b / 0.45);
+        background: var(--color-failed-wash);
+        color: var(--color-ink);
+    }
+
+    &[data-tone="warning"] {
+        border-color: rgb(from var(--color-time) r g b / 0.45);
+        background: var(--color-time-wash);
+        color: var(--color-ink);
+    }
+}

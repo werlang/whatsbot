@@ -1,0 +1,104 @@
+/* Gateway entry (/): quiet 300 ms brand moment while root.js routes the browser. */
+
+@layer tokens, base, components;
+
+@import url("./tokens.css") layer(tokens);
+@import url("./base.css") layer(base);
+@import url("./button.css") layer(components);
+
+.gateway {
+    display: grid;
+    place-items: center;
+    min-block-size: 100dvh;
+    padding: var(--space-4);
+}
+
+.gateway__panel {
+    display: grid;
+    justify-items: start;
+    gap: var(--space-4);
+    inline-size: min(24rem, 100%);
+    padding: var(--space-6);
+    background: var(--color-sheet);
+    border: var(--hairline) solid var(--color-rule);
+    border-radius: var(--radius-lg);
+}
+
+.gateway__brand {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--color-ink-soft);
+}
+
+.gateway__title {
+    font-family: var(--font-display);
+    font-size: var(--text-2xl);
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.01em;
+    text-transform: uppercase;
+}
+
+.gateway__track {
+    position: relative;
+    inline-size: 100%;
+    block-size: 0.5rem;
+    background: linear-gradient(var(--color-rule-strong), var(--color-rule-strong)) center / 100% 1px no-repeat;
+}
+
+.gateway__sweep {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    inline-size: 38%;
+    background: linear-gradient(var(--color-time-fill), var(--color-time-fill)) center / 100% 2px no-repeat;
+
+    &::after {
+        content: "";
+        position: absolute;
+        inset-inline-end: -4px;
+        inset-block-start: 50%;
+        inline-size: 8px;
+        block-size: 8px;
+        margin-block-start: -4px;
+        border-radius: 50%;
+        background: var(--color-time-fill);
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+        animation: gateway-sweep 900ms var(--ease-out) infinite alternate;
+    }
+}
+
+@keyframes gateway-sweep {
+    from {
+        inline-size: 18%;
+    }
+
+    to {
+        inline-size: 72%;
+    }
+}
+
+.gateway__meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    inline-size: 100%;
+    font-size: var(--text-sm);
+    color: var(--color-ink-muted);
+}
+
+.gateway__noscript {
+    display: grid;
+    gap: var(--space-3);
+    inline-size: 100%;
+    padding-block-start: var(--space-4);
+    border-block-start: var(--hairline) solid var(--color-rule);
+    font-size: var(--text-sm);
+    color: var(--color-ink-soft);
+}

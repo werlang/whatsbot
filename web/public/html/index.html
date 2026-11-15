@@ -4,199 +4,249 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
     <title>{{metaTitle}}</title>
     <meta name="description" content="{{metaDescription}}">
+    <meta name="api-url" content="{{apiUrl}}">
     <link rel="canonical" href="{{webUrl}}{{canonicalPath}}">
-    <link rel="stylesheet" href="/css/index.css">
+    <link rel="icon" href="/img/mark.svg" type="image/svg+xml">
+    <link rel="preload" href="/fonts/martian-mono-var.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/fonts/source-sans-3-var.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/css/workspace.css">
     <script type="module" src="/js/index.js"></script>
 </head>
 
-<body>
-    <div class="app-background" aria-hidden="true"></div>
-    <main class="app-shell">
-        <header class="app-topbar">
-            <a class="brand" href="/session/{{sessionId}}" aria-label="Open this WhatsBot session">
-                <span class="brand__mark">W</span>
-                <span class="brand__text">
-                    <strong>WhatsBot</strong>
-                    <span>Schedule</span>
-                </span>
+<body class="workspace">
+    <a class="skip-link" href="#phone-number">Skip to new message</a>
+
+    <header class="topbar">
+        <a class="brand" href="/session/{{sessionId}}" aria-label="WhatsBot, this workspace">
+            <img class="brand__mark" src="/img/mark.svg" alt="" width="28" height="28">
+            <span class="brand__name">WhatsBot</span>
+        </a>
+
+        <div class="topbar__title">
+            <h1 class="topbar__heading">{{heading}}</h1>
+            <p class="topbar__account" data-role="session-ready-indicator" hidden>
+                <span class="visually-hidden">Sending as </span>
+                <span id="session-client-info" data-role="session-client-info"></span>
+            </p>
+        </div>
+
+        <div class="topbar__end">
+            <p class="state-chip" aria-live="polite">
+                <span class="lamp" aria-hidden="true"></span>
+                <span class="visually-hidden">WhatsApp status:</span>
+                <strong id="session-status" data-role="session-status" data-tone="info">Checking</strong>
+            </p>
+            <a class="button button--quiet button--sm topbar__pair" href="/login">
+                <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-qr"></use></svg>
+                <span>Pair another phone</span>
             </a>
+        </div>
+    </header>
 
-            <div class="topbar__actions">
-                <p class="topbar__session">Session <strong data-role="active-session-id">main</strong></p>
-                <p class="topbar__connection" data-role="session-ready-indicator" hidden>
-                    <strong>Connected</strong>
-                </p>
-                <a class="button button--ghost" href="/login">Pair another phone</a>
-            </div>
-        </header>
+    <section class="board" id="next-send" aria-labelledby="next-send-title" data-state="empty">
+        <h2 class="visually-hidden" id="next-send-title">Next message to leave</h2>
+        <p class="board__label">Next</p>
+        <p class="board__time">
+            <time id="next-send-time">--:--</time>
+            <span class="board__day" id="next-send-day">Nothing queued</span>
+        </p>
+        <div class="board__route">
+            <p class="board__to" id="next-send-to">The board is clear</p>
+            <p class="board__message" id="next-send-message">Schedule a message and its departure shows here.</p>
+        </div>
+        <div class="board__track" aria-hidden="true">
+            <span class="board__track-fill" id="next-send-fill"></span>
+        </div>
+        <p class="board__countdown">
+            <span class="board__countdown-label" id="next-send-countdown-label">Leaves in</span>
+            <span class="board__digits" id="next-send-countdown" role="timer" aria-labelledby="next-send-countdown-label">--:--:--</span>
+        </p>
+    </section>
 
-        <section class="hero hero--compact">
-            <div class="hero__content">
-                <span class="hero__eyebrow">WhatsBot</span>
-                <h1>{{heading}}</h1>
-                <p class="hero__lede">{{intro}}</p>
-            </div>
-        </section>
+    <div class="workspace-tabs" id="workspace-tabs" role="tablist" aria-label="Workspace sections">
+        <button class="workspace-tabs__tab" id="tab-queue" type="button" role="tab" aria-controls="queue-pane" aria-selected="true">
+            Queue <span class="workspace-tabs__count" data-role="schedule-count">0</span>
+        </button>
+        <button class="workspace-tabs__tab" id="tab-compose" type="button" role="tab" aria-controls="compose-pane" aria-selected="false">
+            New message
+        </button>
+    </div>
 
-        <div class="content-grid">
-            <section class="panel panel--form" aria-labelledby="scheduler-title">
-                <div class="panel__header">
-                    <div>
-                        <span class="panel__kicker" data-role="schedule-form-kicker">New</span>
-                        <h2 id="scheduler-title" data-role="schedule-form-title">Message</h2>
+    <main class="workspace-main" id="main">
+        <section class="compose" id="compose-pane" aria-labelledby="scheduler-title">
+            <header class="pane-head compose__head">
+                <h2 class="pane-head__title" id="scheduler-title" data-role="schedule-form-title">New message</h2>
+                <span class="mode-tag" data-role="schedule-form-kicker" hidden>Editing</span>
+                <button class="button button--quiet button--sm pane-head__end" data-role="schedule-cancel-edit" type="button" hidden>Cancel edit</button>
+            </header>
+
+            <form class="compose__form" id="schedule-form" novalidate>
+                <div class="compose__body">
+                    <fieldset class="compose__group">
+                        <legend class="compose__legend">To</legend>
+
+                        <div class="field">
+                            <label class="field__label" for="phone-number">
+                                <span>Phone number</span>
+                                <span class="field__aside">Country code first</span>
+                            </label>
+                            <input class="field__control field__control--board" id="phone-number" name="phoneNumber" type="tel" autocomplete="tel" inputmode="tel" placeholder="55 11 98765 4321" aria-describedby="phone-echo">
+                            <p class="field__echo" id="phone-echo" aria-live="polite"></p>
+                        </div>
+
+                        <div class="field">
+                            <label class="field__label" for="recipient-entry">
+                                <span>Or a saved contact or group</span>
+                            </label>
+                            <input class="field__control" id="recipient-entry" name="recipientEntry" type="search" autocomplete="off" list="recipient-directory" placeholder="Search contacts" aria-describedby="recipient-directory-status">
+                            <datalist id="recipient-directory"></datalist>
+                            <input id="recipient-picker" name="recipient" type="hidden" value="">
+                            <p class="field__hint" id="recipient-directory-status">Contacts appear once WhatsApp shares them.</p>
+                        </div>
+                    </fieldset>
+
+                    <div class="field">
+                        <label class="field__label" for="message">
+                            <span>Message</span>
+                            <span class="field__aside board-type" data-role="message-counter">0 characters</span>
+                        </label>
+                        <textarea class="field__control" id="message" name="message" rows="5" placeholder="Write it the way it should arrive." required></textarea>
                     </div>
 
-                    <div class="panel__actions">
-                        <button class="button button--ghost" data-role="schedule-cancel-edit" type="button" hidden>Cancel edit</button>
+                    <fieldset class="compose__group">
+                        <legend class="compose__legend">Leaves at</legend>
+
+                        <div class="presets" aria-label="Quick times">
+                            <button class="preset" type="button" data-role="schedule-preset" data-preset="15-minutes" aria-pressed="false">In 15 min</button>
+                            <button class="preset" type="button" data-role="schedule-preset" data-preset="tonight" aria-pressed="false">18:00</button>
+                            <button class="preset" type="button" data-role="schedule-preset" data-preset="tomorrow-morning" aria-pressed="false">Next 09:00</button>
+                        </div>
+
+                        <div class="field">
+                            <label class="field__label" for="scheduled-for">
+                                <span>Date and time</span>
+                            </label>
+                            <input class="field__control field__control--board" id="scheduled-for" name="scheduledFor" type="datetime-local" step="60" required aria-describedby="scheduled-for-hint">
+                            <p class="field__hint" id="scheduled-for-hint">{{schedulerHint}} <strong data-role="timezone-label">your local zone</strong>. {{intro}}</p>
+                        </div>
+                    </fieldset>
+                </div>
+
+                <footer class="compose__footer">
+                    <div class="feedback" id="form-feedback" data-role="form-feedback" hidden aria-live="polite"></div>
+                    <p class="compose__summary" data-role="schedule-preview" aria-live="polite">Add a number, a message and a time.</p>
+                    <button class="button button--primary compose__submit" id="schedule-submit" type="submit">Schedule</button>
+                </footer>
+            </form>
+        </section>
+
+        <section class="queue" id="queue-pane" aria-labelledby="scheduled-messages-title">
+            <aside class="session-panel" data-role="session-panel" aria-labelledby="session-title">
+                <div class="session-panel__head">
+                    <div class="session-panel__text">
+                        <h2 class="session-panel__title" id="session-title" data-role="session-progress-eyebrow">Checking the WhatsApp connection</h2>
+                        <p class="session-panel__body" data-role="session-progress-body">Messages still queue while the phone connects.</p>
+                    </div>
+                    <div class="session-panel__actions">
+                        <button class="button button--sm" data-role="session-check-now" type="button">
+                            <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-refresh"></use></svg>
+                            <span>Check now</span>
+                        </button>
+                        <a class="button button--sm button--quiet" href="/login">Pair again</a>
                     </div>
                 </div>
 
-                <div class="feedback" id="form-feedback" data-role="form-feedback" hidden aria-live="polite"></div>
-
-                <form class="form" id="schedule-form">
-                    <section class="form__section" aria-labelledby="recipient-section-title">
-                        <div class="field-heading">
-                            <h3 id="recipient-section-title">To</h3>
-                        </div>
-
-                        <div class="form__split">
-                            <label class="form__field" for="recipient-entry">
-                                <span>Contact or group</span>
-                                <input id="recipient-entry" name="recipientEntry" type="search" autocomplete="off" list="recipient-directory" placeholder="Contacts load after pairing." aria-describedby="recipient-directory-status">
-                                <datalist id="recipient-directory"></datalist>
-                                <input id="recipient-picker" name="recipient" type="hidden" value="">
-                            </label>
-
-                            <label class="form__field" for="phone-number">
-                                <span>Phone number</span>
-                                <input id="phone-number" name="phoneNumber" type="tel" autocomplete="tel" inputmode="tel" placeholder="5551999999999">
-                            </label>
-                        </div>
-
-                        <p class="form__hint" id="recipient-directory-status">Or type a number.</p>
-                    </section>
-
-                    <section class="form__section" aria-labelledby="message-section-title">
-                        <div class="field-heading">
-                            <h3 id="message-section-title">Message</h3>
-                        </div>
-
-                        <label class="form__field" for="message">
-                            <span>Message</span>
-                            <textarea id="message" name="message" rows="6" placeholder="Hello! This is your scheduled reminder." required></textarea>
-                        </label>
-
-                        <div class="form__meta-row">
-                            <p class="form__caption" data-role="message-counter">0 characters</p>
-                        </div>
-                    </section>
-
-                    <section class="form__section" aria-labelledby="time-section-title">
-                        <div class="field-heading">
-                            <h3 id="time-section-title">When</h3>
-                        </div>
-
-                        <div class="preset-row" aria-label="Quick time presets">
-                            <button class="chip" type="button" data-role="schedule-preset" data-preset="15-minutes">15 min</button>
-                            <button class="chip" type="button" data-role="schedule-preset" data-preset="tonight">18:00</button>
-                            <button class="chip" type="button" data-role="schedule-preset" data-preset="tomorrow-morning">Next 09:00</button>
-                        </div>
-
-                        <label class="form__field" for="scheduled-for">
-                            <span>Time</span>
-                            <input id="scheduled-for" name="scheduledFor" type="datetime-local" step="60" required>
-                        </label>
-
-                        <div class="form__meta-row form__meta-row--stacked">
-                            <p class="form__hint">Local time: <strong data-role="timezone-label">Loading timezone...</strong></p>
-                        </div>
-                    </section>
-
-                    <section class="preview-card" aria-live="polite">
-                        <p class="preview-card__eyebrow">Summary</p>
-                        <p class="preview-card__text" data-role="schedule-preview">Fill the form.</p>
-                    </section>
-
-                    <div class="form__actions">
-                        <button class="button button--primary" id="schedule-submit" type="submit">Schedule</button>
+                <div class="session-panel__progress" data-role="session-progress" aria-live="polite">
+                    <div class="meter" aria-hidden="true">
+                        <span class="meter__fill" data-role="session-progress-fill"></span>
                     </div>
-                </form>
-            </section>
+                    <p class="session-panel__meta board-type" data-role="session-progress-meta">{{sessionHint}}</p>
+                </div>
 
-            <div class="panel-stack">
-                <aside class="panel panel--session" data-role="session-panel" aria-labelledby="session-title">
-                    <div class="panel__header">
-                        <div>
-                            <span class="panel__kicker">Status</span>
-                            <h2 id="session-title">Connection</h2>
-                        </div>
+                <figure class="qr" id="session-qr-panel" data-role="session-qr-panel" hidden>
+                    <img class="qr__image" id="session-qr-image" data-role="session-qr-image" alt="QR code to link this session in WhatsApp" width="232" height="232">
+                    <figcaption class="qr__steps">
+                        <ol>
+                            <li>Open WhatsApp on the phone that sends.</li>
+                            <li>Go to Settings, then Linked devices.</li>
+                            <li>Tap Link a device and point it at this code.</li>
+                        </ol>
+                    </figcaption>
+                </figure>
+
+                <dl class="session-panel__facts">
+                    <div>
+                        <dt>Connection</dt>
+                        <dd id="session-connection" data-role="session-connection">Waiting for the first report</dd>
                     </div>
-
-                    <div class="session-card">
-                        <p class="session-card__status">
-                            <span>Status</span>
-                            <strong id="session-status" data-role="session-status">Checking status...</strong>
-                        </p>
-                        <p class="session-card__meta" id="session-connection" data-role="session-connection">Checking WhatsApp.</p>
-                        <p class="session-card__note" id="session-note" data-role="session-note">You can schedule before pairing finishes.</p>
-                        <p class="session-card__meta" id="session-last-event" data-role="session-last-event" hidden></p>
-                        <p class="session-card__meta" id="session-client-info" data-role="session-client-info" hidden></p>
+                    <div>
+                        <dt>Note</dt>
+                        <dd id="session-note" data-role="session-note">You can schedule before pairing finishes.</dd>
                     </div>
-
-                    <section class="session-progress" data-role="session-progress" aria-live="polite">
-                        <div class="session-progress__header">
-                            <p class="session-progress__eyebrow" data-role="session-progress-eyebrow">Checking session</p>
-                            <p class="session-progress__meta" data-role="session-progress-meta">Loading status.</p>
-                        </div>
-                        <p class="session-progress__body" data-role="session-progress-body">We keep this updated.</p>
-                        <div class="session-progress__bar" aria-hidden="true">
-                            <span class="session-progress__fill" data-role="session-progress-fill"></span>
-                        </div>
-                        <div class="session-progress__actions">
-                            <button class="button button--ghost" data-role="session-check-now" type="button">Check</button>
-                            <a class="button button--secondary" href="/login">Pair phone</a>
-                        </div>
-                    </section>
-
-                    <figure class="qr-panel" id="session-qr-panel" data-role="session-qr-panel" hidden>
-                        <img id="session-qr-image" data-role="session-qr-image" alt="WhatsApp QR code for pairing this scheduler session">
-                        <figcaption>Scan in WhatsApp.</figcaption>
-                    </figure>
-                </aside>
-
-                <section class="panel panel--schedule-list" aria-labelledby="scheduled-messages-title">
-                    <div class="panel__header">
-                        <div>
-                            <span class="panel__kicker">Queue</span>
-                            <h2 id="scheduled-messages-title">Scheduled messages</h2>
-                        </div>
-
-                        <div class="panel__actions">
-                            <button class="button button--ghost" data-role="schedule-refresh" type="button">Refresh</button>
-                            <span class="panel__badge" data-role="schedule-count">0</span>
-                        </div>
+                    <div id="session-reconnect-row">
+                        <dt>Reconnect</dt>
+                        <dd id="session-reconnect" data-role="session-reconnect" hidden></dd>
                     </div>
-
-                    <div class="feedback" id="schedule-list-feedback" data-role="schedule-list-feedback" hidden aria-live="polite"></div>
-
-                    <div class="schedule-list-shell" aria-label="Scheduled messages for this session">
-                        <div class="schedule-list__head" aria-hidden="true">
-                            <span>Message</span>
-                            <span>Time</span>
-                            <span>Status</span>
-                            <span>Actions</span>
-                        </div>
-                        <div class="schedule-list__body" data-role="schedule-list"></div>
-                        <p class="schedule-list__empty" data-role="schedule-list-empty">No scheduled messages yet.</p>
+                    <div id="session-last-event-row">
+                        <dt>Updated</dt>
+                        <dd id="session-last-event" data-role="session-last-event" hidden></dd>
                     </div>
-                </section>
+                </dl>
+            </aside>
+
+            <header class="pane-head queue__head">
+                <h2 class="pane-head__title" id="scheduled-messages-title">Scheduled messages</h2>
+                <p class="queue__tally board-type" id="queue-tally" aria-live="polite"></p>
+                <button class="button button--quiet button--sm pane-head__end" data-role="schedule-refresh" type="button">
+                    <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-refresh"></use></svg>
+                    <span>Refresh</span>
+                </button>
+            </header>
+
+            <div class="feedback queue__feedback" id="schedule-list-feedback" data-role="schedule-list-feedback" hidden aria-live="polite"></div>
+
+            <div class="queue__columns label-type" aria-hidden="true">
+                <span>Leaves</span>
+                <span>To and message</span>
+                <span>Status</span>
+                <span></span>
             </div>
-        </div>
 
-        <p class="footer-note">&copy; <span data-role="year">{{year}}</span> {{siteName}}</p>
+            <div class="queue__loading" data-role="schedule-list-loading" aria-live="polite">
+                <span class="visually-hidden">Loading scheduled messages</span>
+                <div class="ticket ticket--skeleton" aria-hidden="true">
+                    <div class="ticket__when"><span class="skeleton-bar skeleton-bar--time"></span><span class="skeleton-bar skeleton-bar--sub"></span></div>
+                    <div class="ticket__what"><span class="skeleton-bar skeleton-bar--to"></span><span class="skeleton-bar skeleton-bar--msg"></span></div>
+                    <div class="ticket__status"><span class="skeleton-bar skeleton-bar--status"></span></div>
+                </div>
+                <div class="ticket ticket--skeleton" aria-hidden="true">
+                    <div class="ticket__when"><span class="skeleton-bar skeleton-bar--time"></span><span class="skeleton-bar skeleton-bar--sub"></span></div>
+                    <div class="ticket__what"><span class="skeleton-bar skeleton-bar--to"></span><span class="skeleton-bar skeleton-bar--msg"></span></div>
+                    <div class="ticket__status"><span class="skeleton-bar skeleton-bar--status"></span></div>
+                </div>
+            </div>
+
+            <div class="queue__list" data-role="schedule-list"></div>
+
+            <div class="queue__empty" data-role="schedule-list-empty" hidden>
+                <p class="queue__empty-title">Nothing is waiting to leave.</p>
+                <p class="queue__empty-body">Type a number, write the message and pick a time. It joins this list, and the board above counts it down.</p>
+                <button class="button button--sm queue__empty-action" id="queue-empty-compose" type="button">
+                    <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-plus"></use></svg>
+                    <span>New message</span>
+                </button>
+            </div>
+
+            <footer class="workspace-foot">
+                <span>&copy; <span data-role="year">{{year}}</span> {{siteName}}</span>
+                <span class="workspace-foot__session">Session <code data-role="active-session-id">{{sessionId}}</code></span>
+            </footer>
+        </section>
     </main>
+
     {{{template-vars}}}
 </body>
 

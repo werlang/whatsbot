@@ -4,155 +4,206 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
     <title>{{metaTitle}}</title>
     <meta name="description" content="{{metaDescription}}">
+    <meta name="api-url" content="{{apiUrl}}">
     <link rel="canonical" href="{{webUrl}}{{canonicalPath}}">
-    <link rel="stylesheet" href="/css/index.css">
+    <link rel="icon" href="/img/mark.svg" type="image/svg+xml">
+    <link rel="preload" href="/fonts/martian-mono-var.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/fonts/source-sans-3-var.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/css/login.css">
     <script type="module" src="/js/login.js"></script>
 </head>
 
-<body>
-    <div class="app-background" aria-hidden="true"></div>
-    <main class="app-shell">
-        <header class="app-topbar">
-            <a class="brand" href="/login" aria-label="Open WhatsBot login">
-                <span class="brand__mark">W</span>
-                <span class="brand__text">
-                    <strong>WhatsBot</strong>
-                    <span>Pair a session</span>
-                </span>
-            </a>
+<body class="login-page">
+    <a class="skip-link" href="#create-session-button">Skip to session access</a>
 
-            <div class="topbar__actions">
-                <a class="button button--ghost" href="/session/main">Scheduler</a>
-            </div>
-        </header>
+    <header class="topbar">
+        <a class="brand" href="/login" aria-label="WhatsBot login">
+            <img class="brand__mark" src="/img/mark.svg" alt="" width="28" height="28">
+            <span class="brand__name">{{siteName}}</span>
+        </a>
 
-        <section class="hero hero--compact">
-            <div class="hero__content">
-                <span class="hero__eyebrow">Connect</span>
-                <h1>{{heading}}</h1>
-                <p class="hero__lede">{{intro}}</p>
-            </div>
-        </section>
-
-        <div class="content-grid">
-            <section class="panel panel--form" aria-labelledby="login-title">
-                <div class="panel__header">
-                    <div>
-                        <span class="panel__kicker">Start</span>
-                        <h2 id="login-title">New session</h2>
-                    </div>
-                </div>
-
-                <div class="feedback" id="login-feedback" data-role="login-feedback" hidden aria-live="polite"></div>
-
-                <div class="step-list" aria-label="Pairing checklist">
-                    <article class="step-list__item" data-step="create">
-                        <p class="step-list__eyebrow">1</p>
-                        <div>
-                            <h3>Create</h3>
-                        </div>
-                    </article>
-
-                    <article class="step-list__item" data-step="copy">
-                        <p class="step-list__eyebrow">2</p>
-                        <div>
-                            <h3>Save code</h3>
-                        </div>
-                    </article>
-
-                    <article class="step-list__item" data-step="scan">
-                        <p class="step-list__eyebrow">3</p>
-                        <div>
-                            <h3>Scan QR</h3>
-                        </div>
-                    </article>
-                </div>
-
-                <p class="form__hint form__hint--muted" data-role="session-id-panel" hidden>Session <strong data-role="session-id">-</strong></p>
-
-                <button class="button button--primary button--wide" id="create-session-button" type="button">Create session</button>
-
-                <section class="form__section" aria-labelledby="restore-session-title">
-                    <div class="field-heading">
-                        <h3 id="restore-session-title">Have a saved code?</h3>
-                    </div>
-
-                    <form class="form" id="login-existing-session-form">
-                        <label class="form__field" for="existing-session-password">
-                            <span>Recovery code</span>
-                            <input id="existing-session-password" type="password" autocomplete="one-time-code" placeholder="Paste code">
-                        </label>
-
-                        <button class="button button--ghost button--wide" id="login-existing-session-button" type="submit">Open session</button>
-                    </form>
-                </section>
-
-                <p class="form__caption">Commands work after pairing.</p>
-            </section>
-
-            <div class="panel-stack">
-                <aside class="panel panel--session" aria-labelledby="session-title">
-                    <div class="panel__header">
-                        <div>
-                            <span class="panel__kicker">Status</span>
-                            <h2 id="session-title">Connection</h2>
-                        </div>
-                    </div>
-
-                    <div class="session-card">
-                        <p class="session-card__status">
-                            <span>Status</span>
-                            <strong id="session-status" data-role="session-status">Waiting for session creation...</strong>
-                        </p>
-                        <p class="session-card__meta" id="session-connection" data-role="session-connection">Create a session.</p>
-                        <p class="session-card__note" id="session-note" data-role="session-note">QR shows here.</p>
-                        <p class="session-card__meta" id="session-last-event" data-role="session-last-event" hidden></p>
-                        <p class="session-card__meta" id="session-client-info" data-role="session-client-info" hidden></p>
-                    </div>
-
-                    <section class="session-progress" data-role="session-progress" aria-live="polite">
-                        <div class="session-progress__header">
-                            <p class="session-progress__eyebrow" data-role="session-progress-eyebrow">Waiting to start</p>
-                            <p class="session-progress__meta" data-role="session-progress-meta">Create a session.</p>
-                        </div>
-                        <p class="session-progress__body" data-role="session-progress-body">We check automatically.</p>
-                        <div class="session-progress__bar" aria-hidden="true">
-                            <span class="session-progress__fill" data-role="session-progress-fill"></span>
-                        </div>
-                        <div class="session-progress__actions">
-                            <button class="button button--ghost" data-role="session-check-now" type="button">Check</button>
-                            <button class="button button--secondary" data-role="session-reload" type="button">Reload</button>
-                        </div>
-                    </section>
-
-                <figure class="qr-panel" id="session-qr-panel" data-role="session-qr-panel" hidden>
-                    <img id="session-qr-image" data-role="session-qr-image" alt="WhatsApp QR code for pairing this login session">
-                    <figcaption>Scan in WhatsApp.</figcaption>
-                </figure>
-
-                <p class="session-card__meta"><a data-role="scheduler-link" href="/" hidden>Open scheduler</a></p>
-            </aside>
+        <div class="topbar__title">
+            <h1 class="topbar__heading">{{heading}}</h1>
+            <p class="topbar__account">{{intro}}</p>
         </div>
 
-        <dialog class="session-secret-modal" id="session-secret-dialog" aria-labelledby="session-secret-title">
-            <div class="session-secret-modal__card">
-                <p class="session-secret-modal__eyebrow">Recovery code</p>
-                <h2 class="session-secret-modal__title" id="session-secret-title">Save this code</h2>
-                <p class="session-secret-modal__body">You need it to reopen this session.</p>
-                <code class="session-secret-modal__value" data-role="session-secret-value"></code>
-                <p class="session-secret-modal__status" data-role="session-secret-status" hidden aria-live="polite"></p>
-                <div class="session-secret-modal__actions">
-                    <button class="button" data-role="session-secret-copy" type="button">Copy code</button>
-                    <button class="button button--secondary" data-role="session-secret-send-now" type="button">Open scheduler</button>
-                    <button class="button button--secondary" data-role="session-secret-close" type="button">Close</button>
-                </div>
-            </div>
-        </dialog>
+        <div class="topbar__end">
+            <p class="state-chip" aria-live="polite">
+                <span class="lamp" aria-hidden="true"></span>
+                <span class="visually-hidden">Session status:</span>
+                <strong id="session-status" data-role="session-status" data-tone="info">Waiting</strong>
+            </p>
+            <a class="button button--quiet button--sm topbar__workspace" href="/session/main" aria-label="Open workspace">
+                <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-arrow"></use></svg>
+                <span>Workspace</span>
+            </a>
+        </div>
+    </header>
 
-        <p class="footer-note">&copy; <span data-role="year">{{year}}</span> {{siteName}}</p>
+    <ol class="steps-bar" aria-label="Pairing steps">
+        <li class="steps-bar__item" data-step="create" data-state="active">
+            <span class="steps-bar__num" aria-hidden="true">01</span>
+            <span class="steps-bar__label">Create session</span>
+        </li>
+        <li class="steps-bar__item" data-step="copy" data-state="pending">
+            <span class="steps-bar__num" aria-hidden="true">02</span>
+            <span class="steps-bar__label">Save code</span>
+        </li>
+        <li class="steps-bar__item" data-step="scan" data-state="pending">
+            <span class="steps-bar__num" aria-hidden="true">03</span>
+            <span class="steps-bar__label">Scan QR</span>
+        </li>
+    </ol>
+
+    <main class="login-main" id="main">
+        <section class="login-access" aria-labelledby="login-title">
+            <header class="pane-head">
+                <h2 class="pane-head__title" id="login-title">New session</h2>
+            </header>
+
+            <div class="login-access__body">
+                <div class="feedback" id="login-feedback" data-role="login-feedback" hidden aria-live="polite"></div>
+
+                <div class="login-access__section">
+                    <p class="login-access__lead">Create a dedicated WhatsApp session. You will get a one-time recovery code and a QR code to link your phone.</p>
+                    <button class="button button--primary button--wide" id="create-session-button" type="button">
+                        <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-plus"></use></svg>
+                        <span>Create session</span>
+                    </button>
+                </div>
+
+                <div class="login-session-badge" data-role="session-id-panel" hidden>
+                    <span>Pending session <strong data-role="session-id">-</strong></span>
+                    <a class="button button--sm login-session-badge__link" data-role="scheduler-link" href="/" hidden>Open scheduler</a>
+                </div>
+
+                <section class="login-access__section" aria-labelledby="restore-session-title">
+                    <h3 class="compose__legend" id="restore-session-title">Have a saved code?</h3>
+
+                    <form class="login-access__form" id="login-existing-session-form">
+                        <div class="field">
+                            <label class="field__label" for="existing-session-password">
+                                <span>Recovery code</span>
+                                <span class="field__aside">One-time password</span>
+                            </label>
+                            <input class="field__control field__control--board" id="existing-session-password" type="password" autocomplete="one-time-code" placeholder="Paste recovery code">
+                        </div>
+
+                        <button class="button button--wide" id="login-existing-session-button" type="submit">
+                            <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-key"></use></svg>
+                            <span>Open session</span>
+                        </button>
+                    </form>
+                </section>
+            </div>
+
+            <p class="login-access__foot">Scheduling starts right away once the session is created; delivery begins after QR pairing finishes.</p>
+        </section>
+
+        <section class="login-pairing" aria-labelledby="session-title">
+            <div class="session-panel login-pairing__panel">
+                <div class="session-panel__head">
+                    <div class="session-panel__text">
+                        <h2 class="session-panel__title" id="session-title">Connection</h2>
+                        <p class="session-panel__body" data-role="session-progress-eyebrow">Waiting to start</p>
+                    </div>
+                    <div class="session-panel__actions">
+                        <button class="button button--sm" data-role="session-check-now" type="button">
+                            <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-refresh"></use></svg>
+                            <span>Check now</span>
+                        </button>
+                        <button class="button button--sm button--quiet" data-role="session-reload" type="button">Reload</button>
+                    </div>
+                </div>
+
+                <div class="session-panel__progress" data-role="session-progress" aria-live="polite">
+                    <p class="session-panel__body" data-role="session-progress-body">Create a session or paste a saved code. Status updates automatically.</p>
+                    <div class="meter" aria-hidden="true">
+                        <span class="meter__fill" data-role="session-progress-fill"></span>
+                    </div>
+                    <p class="session-panel__meta board-type" data-role="session-progress-meta">Waiting for session</p>
+                </div>
+
+                <figure class="qr" id="session-qr-panel" data-role="session-qr-panel" hidden>
+                    <img class="qr__image" id="session-qr-image" data-role="session-qr-image" alt="WhatsApp QR code for pairing this login session" width="232" height="232">
+                    <figcaption class="qr__steps">
+                        <ol>
+                            <li>Open WhatsApp on the phone that sends.</li>
+                            <li>Go to Settings, then Linked devices.</li>
+                            <li>Tap Link a device and point it at this code.</li>
+                        </ol>
+                    </figcaption>
+                </figure>
+
+                <dl class="session-panel__facts">
+                    <div>
+                        <dt>Connection</dt>
+                        <dd id="session-connection" data-role="session-connection">Create or restore a session.</dd>
+                    </div>
+                    <div>
+                        <dt>Note</dt>
+                        <dd id="session-note" data-role="session-note">The QR code appears here once the session starts.</dd>
+                    </div>
+                    <div id="session-reconnect-row">
+                        <dt>Reconnect</dt>
+                        <dd id="session-reconnect" data-role="session-reconnect" hidden></dd>
+                    </div>
+                    <div id="session-last-event-row">
+                        <dt>Updated</dt>
+                        <dd id="session-last-event" data-role="session-last-event" hidden></dd>
+                    </div>
+                    <div id="session-client-info-row">
+                        <dt>Account</dt>
+                        <dd id="session-client-info" data-role="session-client-info" hidden></dd>
+                    </div>
+                </dl>
+            </div>
+
+            <footer class="login-foot">
+                <span>&copy; <span data-role="year">{{year}}</span> {{siteName}}</span>
+                <span>WhatsApp pairing &amp; recovery</span>
+            </footer>
+        </section>
     </main>
+
+    <dialog class="secret-dialog" id="session-secret-dialog" aria-labelledby="session-secret-title">
+        <div class="secret-dialog__card">
+            <div class="secret-dialog__head">
+                <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-key"></use></svg>
+                <h2 class="secret-dialog__title" id="session-secret-title">Save this code</h2>
+            </div>
+
+            <p class="secret-dialog__body">Keep this recovery code safe. It is shown once and lets you reopen this session on any browser.</p>
+
+            <code class="secret-dialog__code board-type" data-role="session-secret-value"></code>
+
+            <dl class="secret-dialog__meta">
+                <div>
+                    <dt>Session</dt>
+                    <dd class="board-type" data-role="session-secret-session-id" hidden></dd>
+                </div>
+                <div>
+                    <dt>Access token</dt>
+                    <dd class="board-type" data-role="session-secret-token" hidden></dd>
+                </div>
+            </dl>
+
+            <p class="feedback" data-role="session-secret-status" hidden aria-live="polite"></p>
+
+            <div class="secret-dialog__actions">
+                <button class="button button--primary" data-role="session-secret-copy" type="button">
+                    <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-copy"></use></svg>
+                    <span>Copy code</span>
+                </button>
+                <button class="button" data-role="session-secret-send-now" type="button">Open scheduler</button>
+                <button class="button button--quiet" data-role="session-secret-close" type="button">Close</button>
+            </div>
+        </div>
+    </dialog>
+
     {{{template-vars}}}
 </body>
 

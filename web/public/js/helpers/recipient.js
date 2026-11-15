@@ -92,8 +92,46 @@ function normalizeRecipientEntries(entries, targetType) {
         .filter(Boolean);
 }
 
+/**
+ * Formats a phone number or WhatsApp contact JID for display without mutating stored values.
+ */
+function formatPhoneNumberForDisplay(rawValue) {
+    const raw = String(rawValue ?? "").trim();
+    if (!raw) {
+        return "";
+    }
+
+    if (raw.endsWith("@g.us")) {
+        return raw;
+    }
+
+    const stripped = raw.replace(/@c\.us$/i, "");
+    const digits = stripped.replace(/\D/g, "");
+    if (digits.length < 8 || digits.length > 15) {
+        return stripped;
+    }
+
+    if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) {
+        const area = digits.slice(2, 4);
+        const subscriber = digits.slice(4);
+        const splitAt = subscriber.length === 9 ? 5 : 4;
+        return `+55 ${area} ${subscriber.slice(0, splitAt)}-${subscriber.slice(splitAt)}`;
+    }
+
+    if (digits.startsWith("1") && digits.length === 11) {
+        return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
+    }
+
+    const ccLen = digits.length >= 11 ? 2 : 1;
+    const cc = digits.slice(0, ccLen);
+    const rest = digits.slice(ccLen);
+    const groups = rest.match(/.{1,4}/g) || [rest];
+    return `+${cc} ${groups.join(" ")}`;
+}
+
 export {
     buildRecipientChoiceValue,
+    formatPhoneNumberForDisplay,
     parseRecipientChoiceValue,
     readRecipientDirectory,
     resolveScheduledMessageTarget,

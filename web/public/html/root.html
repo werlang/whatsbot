@@ -4,45 +4,40 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
     <title>{{metaTitle}}</title>
     <meta name="description" content="{{metaDescription}}">
     <link rel="canonical" href="{{webUrl}}{{canonicalPath}}">
-    <link rel="stylesheet" href="/css/index.css">
+    <link rel="icon" href="/img/mark.svg" type="image/svg+xml">
+    <link rel="preload" href="/fonts/martian-mono-var.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/fonts/source-sans-3-var.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/css/gateway.css">
     <script type="module" src="/js/root.js"></script>
 </head>
 
-<body>
-    <div class="app-background" aria-hidden="true"></div>
-    <main class="app-shell app-shell--gateway">
-        <header class="app-topbar app-topbar--gateway">
-            <a class="brand" href="/login" aria-label="Open WhatsBot login">
-                <span class="brand__mark">W</span>
-                <span class="brand__text">
-                    <strong>WhatsBot</strong>
-                    <span>WhatsApp scheduling</span>
-                </span>
-            </a>
-        </header>
+<body class="gateway">
+    <main class="gateway__panel" aria-labelledby="gateway-title">
+        <div class="gateway__brand">
+            <img src="/img/mark.svg" alt="" width="28" height="28">
+            <span>{{siteName}}</span>
+        </div>
 
-        <section class="hero hero--split hero--gateway">
-            <div class="hero__content hero__content--gateway">
-                <span class="hero__eyebrow">WhatsBot</span>
-                <h1>Opening...</h1>
-                <p class="hero__lede">One moment.</p>
-                <p class="hero__hint"><a href="/login">Open login</a></p>
-            </div>
-        </section>
+        <h1 class="gateway__title" id="gateway-title">Opening...</h1>
+
+        <div class="gateway__track" aria-hidden="true">
+            <span class="gateway__sweep"></span>
+        </div>
+
+        <div class="gateway__meta">
+            <span>Checking browser session</span>
+            <a class="button button--quiet button--sm" href="/login">Open login</a>
+        </div>
 
         <noscript>
-            <section class="panel panel--gateway">
-                <div class="panel__header">
-                    <div>
-                        <span class="panel__kicker">JavaScript required</span>
-                        <h2>Open login</h2>
-                    </div>
-                </div>
-                <p><a class="button button--ghost" href="/login">Go to login</a></p>
-            </section>
+            <div class="gateway__noscript">
+                <p>JavaScript is required to open a saved session automatically.</p>
+                <a class="button button--primary button--sm" href="/login">Go to login</a>
+            </div>
         </noscript>
     </main>
     {{{template-vars}}}

@@ -1,0 +1,165 @@
+/*
+ * WhatsBot design tokens.
+ * Single source for fonts, colour, type scale, spacing, radii, motion and
+ * global browser chrome. Every other stylesheet reads from here.
+ * Light and dark come from the same semantic tokens through light-dark().
+ */
+
+@font-face {
+    font-family: "Big Shoulders Display";
+    src: url("/fonts/big-shoulders-display-var.woff2") format("woff2");
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Source Sans 3";
+    src: url("/fonts/source-sans-3-var.woff2") format("woff2");
+    font-weight: 200 900;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Martian Mono";
+    src: url("/fonts/martian-mono-var.woff2") format("woff2");
+    font-weight: 100 800;
+    font-stretch: 75% 112.5%;
+    font-style: normal;
+    font-display: swap;
+}
+
+:root {
+    color-scheme: light dark;
+
+    /* Palette: named values. Use the semantic roles below, never these directly in components. */
+    --graphite-950: #0d0f11;
+    --graphite-900: #16191c;
+    --graphite-850: #1c2024;
+    --graphite-800: #23282d;
+    --graphite-700: #343b42;
+    --graphite-500: #5d666f;
+    --graphite-400: #8a939b;
+    --graphite-300: #b4bbc1;
+    --slate-200: #d5dade;
+    --slate-150: #e2e6e9;
+    --slate-100: #e9ecee;
+    --slate-50: #f4f6f7;
+    --sodium-500: #f2a516;
+    --sodium-400: #f7b847;
+    --sodium-700: #8c4f00;
+    --receipt-600: #1b7449;
+    --receipt-400: #4fc48b;
+    --fault-600: #b3312a;
+    --fault-400: #f2766b;
+
+    /* Ground and surfaces */
+    --color-ground: light-dark(var(--slate-100), var(--graphite-900));
+    --color-sheet: light-dark(var(--slate-50), var(--graphite-850));
+    --color-sheet-raised: light-dark(#fbfcfc, var(--graphite-800));
+    --color-field: light-dark(#ffffff, var(--graphite-900));
+    --color-rule: light-dark(var(--slate-200), var(--graphite-700));
+    --color-rule-strong: light-dark(var(--graphite-300), var(--graphite-500));
+
+    /* Ink */
+    --color-ink: light-dark(var(--graphite-850), #e6e9ec);
+    --color-ink-soft: light-dark(var(--graphite-700), var(--slate-200));
+    --color-ink-muted: light-dark(var(--graphite-500), var(--graphite-400));
+    --color-ink-inverse: light-dark(#f4f6f7, var(--graphite-900));
+
+    /* The board: the departure strip is always a graphite band */
+    --color-board: light-dark(var(--graphite-850), var(--graphite-950));
+    --color-board-ink: #eef1f3;
+    --color-board-muted: #9aa3ab;
+    --color-board-rule: #3b434b;
+
+    /* Signal roles. Sodium means time, receipt means delivered, fault means failed. */
+    --color-time: light-dark(var(--sodium-700), var(--sodium-400));
+    --color-time-board: var(--sodium-500);
+    --color-time-fill: var(--sodium-500);
+    --color-time-wash: light-dark(#fbefd9, #3a2e17);
+    --color-sent: light-dark(var(--receipt-600), var(--receipt-400));
+    --color-sent-wash: light-dark(#e1f1e8, #183326);
+    --color-failed: light-dark(var(--fault-600), var(--fault-400));
+    --color-failed-wash: light-dark(#f8e3e1, #3c1d1b);
+
+    /* Action: primary buttons use ink, not a brand hue, so colour stays reserved for meaning */
+    --color-action: light-dark(var(--graphite-850), #e6e9ec);
+    --color-action-hover: light-dark(#000000, #ffffff);
+    --color-action-ink: light-dark(#ffffff, var(--graphite-900));
+    --color-focus: light-dark(#8c4f00, #f7b847);
+
+    /* Type families */
+    --font-display: "Big Shoulders Display", "Arial Narrow", sans-serif;
+    --font-body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    --font-board: "Martian Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+    /* Type scale: fixed rem, ratio about 1.2 */
+    --text-2xs: 0.6875rem;
+    --text-xs: 0.75rem;
+    --text-sm: 0.875rem;
+    --text-md: 1rem;
+    --text-lg: 1.125rem;
+    --text-xl: 1.375rem;
+    --text-2xl: 1.75rem;
+    --text-board: 2.25rem;
+    --text-board-lg: 3.25rem;
+
+    --leading-tight: 1.15;
+    --leading-snug: 1.35;
+    --leading-body: 1.5;
+    --tracking-label: 0.06em;
+
+    /* Spacing: 4px base */
+    --space-1: 0.25rem;
+    --space-2: 0.5rem;
+    --space-3: 0.75rem;
+    --space-4: 1rem;
+    --space-5: 1.25rem;
+    --space-6: 1.5rem;
+    --space-8: 2rem;
+    --space-10: 2.5rem;
+    --space-12: 3rem;
+
+    /* Shape */
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 10px;
+    --hairline: 1px;
+
+    /* Depth: only overlays float */
+    --shadow-overlay: 0 18px 48px rgb(13 15 17 / 0.28), 0 2px 6px rgb(13 15 17 / 0.12);
+
+    /* Layout */
+    --topbar-height: 3.5rem;
+    --compose-width: 27rem;
+    --content-max: 90rem;
+
+    /* Motion */
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --duration-fast: 140ms;
+    --duration-base: 220ms;
+    --duration-slow: 600ms;
+
+    /* Layers */
+    --z-sticky: 10;
+    --z-topbar: 20;
+}
+
+::selection {
+    background: var(--color-time-wash);
+    color: var(--color-ink);
+}
+
+:root {
+    accent-color: var(--color-action);
+    caret-color: var(--color-time);
+    scrollbar-color: var(--color-rule-strong) transparent;
+    scrollbar-width: thin;
+}
+
+:focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+}

@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg">
+  <!-- WhatsBot icon set: 24px grid, 1.75 stroke, round joins. Authored for this app. -->
+  <defs>
+    <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="8.25"/>
+      <path d="M12 7.5V12l3 2"/>
+    </symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="8.25"/>
+      <path d="m8.25 12.25 2.5 2.5 5-5.25"/>
+    </symbol>
+    <symbol id="i-fault" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10.4 4.6 3.3 17a1.85 1.85 0 0 0 1.6 2.75h14.2A1.85 1.85 0 0 0 20.7 17L13.6 4.6a1.85 1.85 0 0 0-3.2 0Z"/>
+      <path d="M12 9.5v4"/>
+      <path d="M12 16.6v.05"/>
+    </symbol>
+    <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4.5 12h11"/>
+      <path d="m11.5 6.5 6 5.5-6 5.5"/>
+      <path d="M20 5v14"/>
+    </symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M19.25 12a7.25 7.25 0 1 1-2.1-5.1"/>
+      <path d="M19.25 4.75v4.5h-4.5"/>
+    </symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14.5 5.5 18.5 9.5"/>
+      <path d="M4.75 19.25l1-4.25L16 4.75a1.8 1.8 0 0 1 2.55 0l.7.7a1.8 1.8 0 0 1 0 2.55L9 18.25Z"/>
+    </symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4.75 7h14.5"/>
+      <path d="M9.5 7V5.25h5V7"/>
+      <path d="M6.75 7l.8 11.2a1.5 1.5 0 0 0 1.5 1.3h5.9a1.5 1.5 0 0 0 1.5-1.3L17.25 7"/>
+      <path d="M10.25 10.5v5.5M13.75 10.5v5.5"/>
+    </symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="7" y="3.25" width="10" height="17.5" rx="2"/>
+      <path d="M11 17.25h2"/>
+    </symbol>
+    <symbol id="i-group" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="9" cy="9" r="3"/>
+      <path d="M3.75 18.5c.6-2.9 2.6-4.5 5.25-4.5s4.65 1.6 5.25 4.5"/>
+      <path d="M15.5 6.25a3 3 0 0 1 0 5.6"/>
+      <path d="M17 14.25c1.7.5 2.85 1.9 3.25 4.25"/>
+    </symbol>
+    <symbol id="i-qr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="4" y="4" width="6" height="6" rx="1"/>
+      <rect x="14" y="4" width="6" height="6" rx="1"/>
+      <rect x="4" y="14" width="6" height="6" rx="1"/>
+      <path d="M14 14h2.5v2.5H14zM19.5 14v.01M14 19.5h.01M17 19.5h3V17"/>
+    </symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="8.75" y="8.75" width="10.5" height="10.5" rx="1.75"/>
+      <path d="M15.25 8.75v-2.2a1.8 1.8 0 0 0-1.8-1.8H6.55a1.8 1.8 0 0 0-1.8 1.8v6.9a1.8 1.8 0 0 0 1.8 1.8h2.2"/>
+    </symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M5 12h14"/>
+      <path d="m13 6 6 6-6 6"/>
+    </symbol>
+    <symbol id="i-unplug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8.5 4.75v3.5M13 4.75v3.5"/>
+      <path d="M6.25 8.25h9v3.5a4.5 4.5 0 0 1-4.5 4.5 4.5 4.5 0 0 1-4.5-4.5Z"/>
+      <path d="M10.75 16.25v3"/>
+      <path d="m16.5 15.5 3 3M19.5 15.5l-3 3"/>
+    </symbol>
+    <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="8" cy="15.5" r="3.75"/>
+      <path d="m10.75 12.75 7.5-7.5M15.5 8l2.25 2.25M17.25 6.25 19 8"/>
+    </symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 5.5v13M5.5 12h13"/>
+    </symbol>
+    <symbol id="i-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m6.5 6.5 11 11M17.5 6.5l-11 11"/>
+    </symbol>
+  </defs>
+</svg>

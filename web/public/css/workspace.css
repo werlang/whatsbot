@@ -1,0 +1,74 @@
+/* Workspace entry (/session/:id): composition and page layout only. */
+
+@layer tokens, base, components;
+
+@import url("./tokens.css") layer(tokens);
+@import url("./base.css") layer(base);
+@import url("./button.css") layer(components);
+@import url("./field.css") layer(components);
+@import url("./status.css") layer(components);
+@import url("./topbar.css") layer(components);
+@import url("./board.css") layer(components);
+@import url("./pane.css") layer(components);
+@import url("./compose.css") layer(components);
+@import url("./queue.css") layer(components);
+@import url("./session-panel.css") layer(components);
+
+/*
+ * Phone and tablet: one column, document scroll, board sticky, tabs switch panes.
+ * Desktop: a fixed-height shell. Compose on the left with its submit row pinned,
+ * the queue on the right scrolling on its own.
+ */
+.workspace {
+    display: flex;
+    flex-direction: column;
+
+    @media (min-width: 1024px) {
+        block-size: 100dvh;
+        overflow: clip;
+    }
+}
+
+.workspace-main {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-block-size: 0;
+
+    @media (min-width: 1024px) {
+        display: grid;
+        grid-template-columns: var(--compose-width) minmax(0, 1fr);
+    }
+
+    @media (min-width: 1280px) {
+        grid-template-columns: 30rem minmax(0, 1fr);
+    }
+}
+
+.workspace .compose {
+    flex: 1;
+
+    @media (min-width: 1024px) {
+        border-inline-end: var(--hairline) solid var(--color-rule);
+        overflow: clip;
+
+        .compose__form {
+            overflow: clip;
+        }
+
+        .compose__body {
+            flex: 1;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+        }
+    }
+}
+
+.workspace .queue {
+    flex: 1;
+
+    @media (min-width: 1024px) {
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+}
