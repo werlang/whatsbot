@@ -20,6 +20,8 @@ const { host, port } = appConfig;
 function createApp({
     scheduledMessageModel = ScheduledMessage,
     whatsappClient = whatsappSessionManager,
+    mysqlDriver = Mysql,
+    dispatcher = messageDispatcher,
 } = {}) {
     const app = express();
 
@@ -33,14 +35,34 @@ function createApp({
     }));
     app.use('/whatsapp', createWhatsAppRouter({ whatsappClientManager: whatsappClient }));
 
-    app.get('/ready', (req, res) => {
+    app.get('/ready', async (req, res) => {
+        const database = { ready: true, error: null };
+        const reasons = [];
+        try {
+            await mysqlDriver.probe();
+        } catch (error) {
+            database.ready = false;
+            database.error = String(error?.message || 'Database probe failed.');
+            reasons.push(database.error);
+        }
+        const readySessionIds = whatsappClient.getReadySessionIds?.() || [];
+        if (readySessionIds.length === 0) {
+            reasons.push('No WhatsApp session is ready to send.');
+        }
+        const schedulerStatus = dispatcher.getStatus();
+        if (schedulerStatus.lastError) {
+            reasons.push(`Scheduler failed: ${schedulerStatus.lastError}`);
+        }
         sendSuccess(res, {
             status: 200,
             data: {
-                ready: true,
+                ready: reasons.length === 0,
+                database,
+                reasons,
                 service: 'api',
-                scheduler: appConfig.scheduler,
+                scheduler: { ...appConfig.scheduler, ...schedulerStatus },
                 whatsapp: {
+                    readySessionIds,
                     authPath: appConfig.whatsapp.authPath,
                     clientId: whatsappClient.getDefaultSessionId?.() || appConfig.whatsapp.clientId,
                     puppeteerArgs: appConfig.whatsapp.puppeteerArgs,
@@ -48,7 +70,7 @@ function createApp({
                     sessionStatus: whatsappClient.getKnownSessionState?.().status || "idle",
                 },
             },
-            message: 'WhatsBot API is ready.',
+            message: reasons.length === 0 ? 'WhatsBot API is ready.' : 'WhatsBot API is not ready.',
         });
     });
 

@@ -39,7 +39,8 @@ Current HTTP routes:
 - `GET /whatsapp/sessions/:sessionId`
   - returns the current state for a specific app session
 - `GET /ready`
-  - readiness payload for the API runtime
+  - HTTP 200 readiness payload for the API runtime; `data.ready` requires a reachable MySQL database with both application tables, at least one ready WhatsApp session, and no recorded scheduler failure
+  - includes `database`, explicit `reasons`, `whatsapp.readySessionIds`, and the last tick time, processed count, and error under `scheduler`; the database probe has a one-second deadline and does not cache success
 
 The dispatcher only sends due messages when their owning WhatsApp session is ready. Messages remain pending if their session is still waiting for pairing or temporarily disconnected.
 

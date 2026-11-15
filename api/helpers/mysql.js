@@ -57,6 +57,28 @@ class Mysql {
     }
 
     /**
+     * Probes connectivity and required tables with a deadline covering pool acquisition too.
+     * Rejects on failure or timeout; every call performs a fresh probe.
+     */
+    static async probe({ timeoutMs = 1000 } = {}) {
+        let timer;
+        try {
+            await Promise.race([
+                (async () => {
+                    await Mysql.#query('SELECT 1');
+                    await Mysql.#query('SELECT id FROM scheduled_messages LIMIT 0');
+                    await Mysql.#query('SELECT session_id FROM whatsapp_session_access LIMIT 0');
+                })(),
+                new Promise((resolve, reject) => {
+                    timer = setTimeout(() => reject(new Error('Database probe timed out.')), timeoutMs);
+                }),
+            ]);
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    /**
      * Closes the shared MySQL connection pool.
      */
     static async close() {
