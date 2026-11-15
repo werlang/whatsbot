@@ -5,6 +5,7 @@ import {
     createDefaultScheduledDateTime,
     formatDateTimeForDisplay,
     formatIsoForDisplay,
+    toDateTimeLocalValue,
 } from "../public/js/helpers/datetime.js";
 import {
     buildRecipientChoiceValue,
@@ -164,7 +165,7 @@ test("scheduled-message helper builds one form draft from an editable schedule",
     }));
     assert.equal(draft.phoneNumber, "5551999999999");
     assert.equal(draft.message, "hello world");
-    assert.match(draft.scheduledFor, /^2026-04-15T/);
+    assert.equal(draft.scheduledFor, toDateTimeLocalValue(new Date("2026-04-15T18:30:00.000Z")));
 });
 
 test("scheduled-message helper derives render details and action availability", () => {
@@ -190,7 +191,9 @@ test("scheduled-message helper derives render details and action availability", 
     assert.equal(viewModel.statusTone, "danger");
     assert.equal(viewModel.canEdit, true);
     assert.equal(viewModel.canDelete, true);
-    assert.match(viewModel.scheduledForLabel, /18:30/);
+    const localTime = new Date("2026-04-15T18:30:00.000Z");
+    const expectedTime = `${String(localTime.getHours()).padStart(2, "0")}:${String(localTime.getMinutes()).padStart(2, "0")}`;
+    assert.ok(viewModel.scheduledForLabel.includes(expectedTime));
 });
 
 test("scheduled-message helper switches form labels for edit mode", () => {
