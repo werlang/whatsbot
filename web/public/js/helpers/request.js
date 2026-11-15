@@ -30,7 +30,7 @@ export class Request {
     }
 
     /**
-     * Executes one HTTP request with timeout and envelope-aware parsing.
+     * Executes one HTTP request with a deadline covering headers and body parsing.
      */
     async #request(url, options = {}) {
         const controller = new AbortController();
@@ -47,8 +47,6 @@ export class Request {
                 },
                 signal: controller.signal,
             });
-
-            clearTimeout(timeoutId);
 
             const contentType = response.headers.get("content-type") || "";
             const parseBody = async function() {
@@ -73,13 +71,13 @@ export class Request {
 
             return await parseBody();
         } catch (error) {
-            clearTimeout(timeoutId);
-
             if (error.name === "AbortError") {
                 throw new Error("Request timeout");
             }
 
             throw error;
+        } finally {
+            clearTimeout(timeoutId);
         }
     }
 
