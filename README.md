@@ -147,6 +147,7 @@ Typical local flow:
 - Existing environments created before the multi-session change must apply [api/data/mysql/migrations/20260415_add_session_id_to_scheduled_messages.sql](/Users/pablowerlang/Documents/Workspaces/whatsbot/api/data/mysql/migrations/20260415_add_session_id_to_scheduled_messages.sql) manually before running the updated API.
 - Existing environments that stored session access data in JSON must also apply [api/data/mysql/migrations/20260416_create_whatsapp_session_access.sql](/Users/pablowerlang/Documents/Workspaces/whatsbot/api/data/mysql/migrations/20260416_create_whatsapp_session_access.sql) before restarting the API.
 - If the WhatsApp session becomes invalid, you may need to re-pair by scanning a new QR code.
+- If the API log shows `ProtocolError: Runtime.callFunctionOn timed out` coming from `Client.inject`, the Chromium profile of that session is wedged: stop the API container, move `/whatsapp/auth/session-<id>` aside (it holds the pairing, not the data), and start the container again. An unpaired profile loses nothing.
 - The API image installs Chromium because `whatsapp-web.js` needs a browser runtime inside Docker.
 - The scheduler stores `scheduledFor` timestamps in UTC after validating timezone-aware input.
 - Each scheduled message belongs to one app session via `sessionId`.
