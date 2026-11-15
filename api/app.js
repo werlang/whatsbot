@@ -92,18 +92,30 @@ async function start({
     mysqlDriver = Mysql,
     whatsappClient = whatsappSessionManager,
     dispatcher = messageDispatcher,
+    listenPort = port,
 } = {}) {
-    await mysqlDriver.waitForReady();
-    await whatsappClient.initialize();
+    // The HTTP API must become reachable before its dependencies are healthy. The WhatsApp
+    // browser boot can take minutes and can fail outright (a corrupted Chromium profile makes
+    // the injected bundle time out), and a database outage must not take the whole endpoint
+    // down: readiness reports both cases while the server keeps answering.
+    await mysqlDriver.waitForReady().catch(error => {
+        console.error('Database is not ready at startup; /ready reports it:', error?.message || error);
+    });
 
     const server = await new Promise((resolve, reject) => {
-        const instance = app.listen(port, host, () => {
-            console.log(`WhatsBot API running on http://${host}:${port}`);
+        const instance = app.listen(listenPort, host, () => {
+            console.log(`WhatsBot API running on http://${host}:${listenPort}`);
             resolve(instance);
         });
 
         instance.on('error', reject);
     });
+
+    const whatsappInitialization = whatsappClient.initialize().catch(error => {
+        console.error('Failed to initialize the WhatsApp client:', error?.message || error);
+        return null;
+    });
+    server.whatsappInitialization = whatsappInitialization;
 
     dispatcher.start();
     registerShutdownHandlers({ server, whatsappClient, dispatcher });
