@@ -153,3 +153,51 @@ test("MessageDispatcher forwards group targets without a phone number", async ()
         message: "hello group",
     }]);
 });
+
+
+test("MessageDispatcher records failures once per distinct error and clears them after success", async () => {
+    let errorMessage = 'Claim failed';
+    const errors = [];
+    const dispatcher = new MessageDispatcher({
+        scheduledMessageModel: { async claimDue() { if (errorMessage) throw new Error(errorMessage); return []; } },
+        whatsappClient: { getReadySessionIds: () => ['alpha'] },
+        logger: { error(...args) { errors.push(args); } },
+    });
+    await assert.rejects(dispatcher.tick(), /Claim failed/);
+    await assert.rejects(dispatcher.tick(), /Claim failed/);
+    assert.equal(errors.length, 1);
+    assert.equal(dispatcher.getStatus().lastError, 'Claim failed');
+    assert.ok(dispatcher.getStatus().lastErrorAt);
+    errorMessage = 'Different failure';
+    await assert.rejects(dispatcher.tick(), /Different failure/);
+    assert.equal(errors.length, 2);
+    errorMessage = 'Claim failed';
+    await assert.rejects(dispatcher.tick(), /Claim failed/);
+    assert.equal(errors.length, 2);
+    errorMessage = null;
+    assert.equal(await dispatcher.tick(), 0);
+    assert.equal(dispatcher.getStatus().lastError, null);
+    assert.equal(dispatcher.getStatus().lastErrorAt, null);
+    assert.equal(dispatcher.getStatus().dispatchedCount, 0);
+    assert.ok(dispatcher.getStatus().lastTickAt);
+    errorMessage = 'Claim failed';
+    await assert.rejects(dispatcher.tick(), /Claim failed/);
+    assert.equal(errors.length, 3);
+});
+
+test("MessageDispatcher records skipped ticks without querying or clearing an untested failure", async () => {
+    let ready = true;
+    let claims = 0;
+    const dispatcher = new MessageDispatcher({
+        scheduledMessageModel: { async claimDue() { claims++; throw new Error('Claim failed'); } },
+        whatsappClient: { getReadySessionIds: () => ready ? ['alpha'] : [] },
+        logger: { error() {} },
+    });
+    await assert.rejects(dispatcher.tick(), /Claim failed/);
+    ready = false;
+    assert.equal(await dispatcher.tick(), 0);
+    assert.equal(claims, 1);
+    assert.equal(dispatcher.getStatus().lastError, 'Claim failed');
+    assert.equal(dispatcher.getStatus().dispatchedCount, 0);
+    assert.ok(dispatcher.getStatus().lastTickAt);
+});
