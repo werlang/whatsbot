@@ -108,7 +108,7 @@ class WhatsAppSessionAccessStore {
     }
 
     /**
-     * Loads the registry from disk once.
+     * Migrates the legacy registry once; reports failures and allows a later retry.
      */
     async initialize() {
         if (this.initializationPromise) {
@@ -118,6 +118,7 @@ class WhatsAppSessionAccessStore {
         this.initializationPromise = this.migrateLegacyRegistry()
             .catch(error => {
                 this.initializationPromise = null;
+                this.logger.error("WhatsBot session access registry initialization failed:", error);
                 throw error;
             });
 
@@ -196,27 +197,36 @@ class WhatsAppSessionAccessStore {
             const fileContent = await fs.readFile(this.filePath, "utf8");
             payload = JSON.parse(fileContent);
         } catch (error) {
-            if (error?.code !== "ENOENT") {
-                this.logger.warn("Could not read legacy WhatsBot session access registry:", error);
+            if (error?.code === "ENOENT") {
+                return;
             }
-
-            return;
+            throw error;
         }
 
-        const sessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
+        if (!Array.isArray(payload?.sessions)) {
+            throw new Error("Legacy WhatsBot session access registry must contain a sessions array.");
+        }
 
-        for (const candidate of sessions) {
+        for (const [index, candidate] of payload.sessions.entries()) {
+            let entry;
+
             try {
-                const entry = {
+                entry = {
                     sessionId: normalizeSessionId(candidate?.sessionId, { required: true }),
                     recoveryPassword: normalizeRecoveryPassword(candidate?.accessPassword, { required: true }),
                     createdAt: String(candidate?.createdAt || "").trim() || new Date().toISOString(),
                 };
-
-                await this.createPersistedSessionAccess(entry, { preserveRecoveryPassword: true });
             } catch (error) {
-                this.logger.warn("Skipping legacy session access registry entry:", error?.message || error);
+                // One malformed entry must not block the migration of every other entry.
+                this.logger.error(`Skipping invalid legacy session access registry entry at index ${index}:`, error?.message || error);
+                continue;
             }
+
+            // A retry after partial migration must preserve already imported credentials.
+            if (await this.sessionAccessModel.findBySessionId(entry.sessionId)) {
+                continue;
+            }
+            await this.createPersistedSessionAccess(entry, { preserveRecoveryPassword: true });
         }
     }
 

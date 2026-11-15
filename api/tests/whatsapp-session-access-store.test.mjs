@@ -263,3 +263,96 @@ test("WhatsAppSessionAccessStore rejects one invalid recovery password", async (
         },
     );
 });
+
+
+test("WhatsAppSessionAccessStore propagates EACCES and retries initialization", async t => {
+    let reads = 0;
+    t.mock.method(fs, 'readFile', async () => {
+        reads++;
+        if (reads === 1) throw Object.assign(new Error('Registry access denied'), { code: 'EACCES' });
+        return JSON.stringify({ sessions: [] });
+    });
+    const errors = [];
+    const store = new WhatsAppSessionAccessStore({ logger: { error(...args) { errors.push(args); }, warn() {} } });
+    await assert.rejects(store.initialize(), { code: 'EACCES' });
+    assert.equal(errors.length, 1);
+    await store.initialize();
+    await store.initialize();
+    assert.equal(reads, 2);
+});
+
+test("WhatsAppSessionAccessStore rejects malformed JSON and invalid registry structure", async t => {
+    let payload = '{';
+    t.mock.method(fs, 'readFile', async () => payload);
+    const store = new WhatsAppSessionAccessStore({ logger: { error() {}, warn() {} } });
+    await assert.rejects(store.initialize(), SyntaxError);
+    payload = '{}';
+    await assert.rejects(store.initialize(), /sessions array/);
+});
+
+test("WhatsAppSessionAccessStore migrates valid legacy entries once under concurrent initialization", async t => {
+    let reads = 0;
+    let creates = 0;
+    t.mock.method(fs, 'readFile', async () => {
+        reads++;
+        return JSON.stringify({ sessions: [{ sessionId: 'legacy', accessPassword: 'jade-rocket-7310' }] });
+    });
+    const model = createSessionAccessModel();
+    const create = model.create;
+    model.create = async payload => { creates++; return create(payload); };
+    const store = createStore(model);
+    await Promise.all([store.initialize(), store.initialize(), store.initialize()]);
+    await store.initialize();
+    assert.equal(reads, 1);
+    assert.equal(creates, 1);
+    assert.equal((await store.loginWithRecoveryPassword('jade-rocket-7310')).sessionId, 'legacy');
+});
+
+test("WhatsAppSessionAccessStore propagates migration failure and retries remaining entries", async t => {
+    t.mock.method(fs, 'readFile', async () => JSON.stringify({ sessions: [
+        { sessionId: 'alpha', accessPassword: 'jade-rocket-7310' },
+        { sessionId: 'beta', accessPassword: 'amber-river-4821' },
+    ] }));
+    const model = createSessionAccessModel();
+    const create = model.create;
+    let failed = true;
+    let alphaCreates = 0;
+    model.create = async payload => {
+        if (payload.sessionId === 'alpha') alphaCreates++;
+        if (payload.sessionId === 'beta' && failed) throw new Error('Migration database unavailable');
+        return create(payload);
+    };
+    const store = new WhatsAppSessionAccessStore({ sessionAccessModel: model, logger: { error() {}, warn() {} } });
+    await assert.rejects(store.initialize(), /Migration database unavailable/);
+    failed = false;
+    await store.initialize();
+    assert.equal(alphaCreates, 1);
+    assert.ok(await store.getBySessionId('beta'));
+});
+
+test("WhatsAppSessionAccessStore keeps a missing legacy file silent", async t => {
+    t.mock.method(fs, 'readFile', async () => { throw Object.assign(new Error('Missing'), { code: 'ENOENT' }); });
+    const logs = [];
+    const store = new WhatsAppSessionAccessStore({ logger: { error(...args) { logs.push(args); }, warn(...args) { logs.push(args); } } });
+    await store.initialize();
+    assert.deepEqual(logs, []);
+});
+
+test("WhatsAppSessionAccessStore skips one invalid legacy entry and still migrates the rest", async t => {
+    t.mock.method(fs, 'readFile', async () => JSON.stringify({ sessions: [
+        { sessionId: 'alpha', accessPassword: 'jade-rocket-7310' },
+        { sessionId: 'beta' },
+        { sessionId: 'gamma', accessPassword: 'amber-river-4821' },
+    ] }));
+    const errors = [];
+    const store = new WhatsAppSessionAccessStore({
+        sessionAccessModel: createSessionAccessModel(),
+        logger: { error(...args) { errors.push(args); }, warn() {} },
+    });
+    await store.initialize();
+    assert.equal(errors.length, 1);
+    assert.match(String(errors[0][0]), /index 1/);
+    assert.ok(await store.getBySessionId('alpha'));
+    assert.equal(await store.getBySessionId('beta'), null);
+    assert.ok(await store.getBySessionId('gamma'));
+});
