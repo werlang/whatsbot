@@ -49,6 +49,7 @@ function createAppConfig(env = process.env) {
             authPath: '/whatsapp/auth',
             puppeteerArgs: readList('--no-sandbox,--disable-setuid-sandbox'),
             executablePath: '/usr/bin/chromium-browser',
+            protocolTimeout: readInteger(env.WHATSAPP_PROTOCOL_TIMEOUT_MS, 5 * 60 * 1000),
         },
     };
 }

@@ -120,6 +120,9 @@ class WhatsAppClientManager {
                 headless: true,
                 executablePath: this.config.executablePath,
                 args: this.config.puppeteerArgs,
+                // Injecting the WhatsApp Web bundle into a slow ARM browser can exceed
+                // puppeteer's 180 s default, which used to abort the whole client boot.
+                protocolTimeout: this.config.protocolTimeout,
             },
         });
         this.registerLifecycleHandlers();
