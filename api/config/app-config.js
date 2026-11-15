@@ -50,6 +50,10 @@ function createAppConfig(env = process.env) {
             puppeteerArgs: readList('--no-sandbox,--disable-setuid-sandbox'),
             executablePath: '/usr/bin/chromium-browser',
             protocolTimeout: readInteger(env.WHATSAPP_PROTOCOL_TIMEOUT_MS, 5 * 60 * 1000),
+            reconnectMaxAttempts: Math.max(0, readInteger(env.WHATSAPP_RECONNECT_MAX_ATTEMPTS, 5)),
+            reconnectDelayMs: Math.max(1, readInteger(env.WHATSAPP_RECONNECT_DELAY_MS, 1000)),
+            reconnectMaxDelayMs: Math.max(1, readInteger(env.WHATSAPP_RECONNECT_MAX_DELAY_MS, 30000)),
+            chatDirectoryRetryMs: Math.max(1, readInteger(env.WHATSAPP_CHAT_DIRECTORY_RETRY_MS, 30000)),
         },
     };
 }

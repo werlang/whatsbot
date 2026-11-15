@@ -44,6 +44,12 @@ Current HTTP routes:
 
 The dispatcher only sends due messages when their owning WhatsApp session is ready. Messages remain pending if their session is still waiting for pairing or temporarily disconnected.
 
+After the access registry initializes, startup restores the default session and registered sessions in the background. Only profiles with WhatsApp IndexedDB storage under `session-<id>/Default/IndexedDB` are candidates; empty or missing profiles are skipped. Existing storage does not guarantee valid pairing. Initial boots and recovery boots share a queue to avoid starting multiple Chromium instances at once. An explicit session-state request still boots a skipped profile so its QR remains available.
+
+A dropped connection or failed boot triggers up to five automatic rebuilds: the first immediately, then after 1, 2, 4, and 8 seconds (delays are capped at 30 seconds when configured for more attempts). A ready event resets the retry budget. State responses add `reconnectAttempt`, `nextReconnectAt`, and `needsQrCode`, and return progress without waiting for an in-flight browser boot. Logout, unpaired states, and authentication failures stop recovery, close the client, and report `needsQrCode: true`. Polling does not restart exhausted or logged-out sessions.
+
+Chat-directory failures preserve the last directory, retry after 30 seconds, and log each distinct failure once until a successful refresh. Sending remains available when enrichment fails. Sends preserve supplied serialized, raw-model, string, or component message ids; if WhatsApp returns none, the id stays null and a warning is logged. Message ids do not require a delivery acknowledgement.
+
 Self-command scheduling is also supported per session. When a paired user sends a message to their own chat in the format below, the API converts it into a scheduled message owned by that session:
 
 ```text
@@ -147,7 +153,7 @@ Typical local flow:
 - Existing environments created before the multi-session change must apply [api/data/mysql/migrations/20260415_add_session_id_to_scheduled_messages.sql](/Users/pablowerlang/Documents/Workspaces/whatsbot/api/data/mysql/migrations/20260415_add_session_id_to_scheduled_messages.sql) manually before running the updated API.
 - Existing environments that stored session access data in JSON must also apply [api/data/mysql/migrations/20260416_create_whatsapp_session_access.sql](/Users/pablowerlang/Documents/Workspaces/whatsbot/api/data/mysql/migrations/20260416_create_whatsapp_session_access.sql) before restarting the API.
 - If the WhatsApp session becomes invalid, you may need to re-pair by scanning a new QR code.
-- If the API log shows `ProtocolError: Runtime.callFunctionOn timed out` coming from `Client.inject`, the Chromium profile of that session is wedged: stop the API container, move `/whatsapp/auth/session-<id>` aside (it holds the pairing, not the data), and start the container again. An unpaired profile loses nothing.
+- If the API log shows `ProtocolError: Runtime.callFunctionOn timed out` from `Client.inject`, check the session's retry state first: the API closes the failed client and rebuilds it with bounded backoff. A timeout alone does not prove profile corruption. Once attempts are exhausted, restarting the API retries persisted profiles. Authentication failures or logout require pairing again; creating a session provides a new QR flow.
 - The API image installs Chromium because `whatsapp-web.js` needs a browser runtime inside Docker.
 - The scheduler stores `scheduledFor` timestamps in UTC after validating timezone-aware input.
 - Each scheduled message belongs to one app session via `sessionId`.
@@ -180,6 +186,7 @@ The root `.env.example` documents the current Compose-oriented defaults. The mai
 - `API_URL` / `WEB_URL`
 - `MYSQL_DATABASE` / `MYSQL_ROOT_PASSWORD`
 - `SCHEDULER_POLL_INTERVAL_MS` / `SCHEDULER_BATCH_SIZE` / `SCHEDULER_CLAIM_TIMEOUT_MS`
+- API process environment: `WHATSAPP_PROTOCOL_TIMEOUT_MS` (default `300000`), `WHATSAPP_RECONNECT_MAX_ATTEMPTS` (default `5`, `0` disables automatic recovery), `WHATSAPP_RECONNECT_DELAY_MS` (default `1000`), `WHATSAPP_RECONNECT_MAX_DELAY_MS` (default `30000`), and `WHATSAPP_CHAT_DIRECTORY_RETRY_MS` (default `30000`). Inject overrides into the API container environment; adding them only to the root `.env` does not forward them through Compose. Delay values have a minimum of `1` ms.
 
 Notes:
 

@@ -126,6 +126,15 @@ class WhatsAppSessionAccessStore {
     }
 
     /**
+     * Lists persisted session ids for startup restoration without exposing access credentials.
+     */
+    async listSessionIds() {
+        await this.initialize();
+        const entries = await this.sessionAccessModel.find({ view: ["session_id"] });
+        return entries.map(entry => normalizeSessionId(entry.sessionId, { required: true }));
+    }
+
+    /**
      * Returns one cloned registry entry for a session id.
      */
     async getBySessionId(sessionId) {
