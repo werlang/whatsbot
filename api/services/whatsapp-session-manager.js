@@ -110,7 +110,12 @@ class WhatsAppSessionManager {
         const session = await this.ensureSession(normalizedSessionId);
 
         if (session.isReady()) {
-            await session.refreshChatDirectory();
+            // Reading the contact directory is enrichment, not a prerequisite for sending: when
+            // WhatsApp Web refuses getChats, every route that reports session state must keep
+            // answering instead of failing with an opaque error.
+            await session.refreshChatDirectory().catch(error => {
+                this.logger.error(`Could not refresh the chat directory for session ${normalizedSessionId}:`, error?.message || error);
+            });
         }
 
         return this.describeSession(normalizedSessionId, session);
