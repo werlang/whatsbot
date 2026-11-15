@@ -23,6 +23,13 @@ class MessageDispatcher {
         this.logger = logger;
         this.timer = null;
         this.running = false;
+        this.loggedErrors = new Set();
+        this.status = {
+            lastTickAt: null,
+            dispatchedCount: 0,
+            lastError: null,
+            lastErrorAt: null,
+        };
     }
 
     /**
@@ -34,15 +41,11 @@ class MessageDispatcher {
         }
 
         this.timer = setInterval(() => {
-            this.tick().catch(error => {
-                this.logger.error("Scheduled message dispatcher tick failed:", error);
-            });
+            this.tick().catch(() => {});
         }, this.pollIntervalMs);
         this.timer.unref?.();
 
-        this.tick().catch(error => {
-            this.logger.error("Initial scheduled message dispatcher tick failed:", error);
-        });
+        this.tick().catch(() => {});
 
         return this;
     }
@@ -60,18 +63,30 @@ class MessageDispatcher {
     }
 
     /**
-     * Processes one dispatcher cycle when the WhatsApp client is ready.
+     * Returns the latest tick outcome without exposing error stacks or mutable state.
+     */
+    getStatus() {
+        return { ...this.status };
+    }
+
+    /**
+     * Processes one cycle, recording failures and logging each distinct failure once.
+     * Skipped ticks never probe the database or clear an untested database failure.
      */
     async tick() {
-        const readySessionIds = this.whatsappClient?.getReadySessionIds?.() || [];
-
-        if (this.running || readySessionIds.length === 0) {
+        if (this.running) {
             return 0;
         }
 
         this.running = true;
+        this.status.lastTickAt = new Date().toISOString();
+        this.status.dispatchedCount = 0;
 
         try {
+            const readySessionIds = this.whatsappClient?.getReadySessionIds?.() || [];
+            if (readySessionIds.length === 0) {
+                return 0;
+            }
             const dueMessages = await this.scheduledMessageModel.claimDue({
                 now: new Date(),
                 limit: this.batchSize,
@@ -82,9 +97,22 @@ class MessageDispatcher {
 
             for (const scheduledMessage of dueMessages) {
                 await this.dispatchScheduledMessage(scheduledMessage);
+                this.status.dispatchedCount += 1;
             }
 
+            this.status.lastError = null;
+            this.status.lastErrorAt = null;
+            this.loggedErrors.clear();
             return dueMessages.length;
+        } catch (error) {
+            const message = String(error?.message || error || "Unknown scheduler failure.");
+            if (!this.loggedErrors.has(message)) {
+                this.logger.error("Scheduled message dispatcher tick failed:", message);
+                this.loggedErrors.add(message);
+            }
+            this.status.lastError = message;
+            this.status.lastErrorAt = new Date().toISOString();
+            throw error;
         } finally {
             this.running = false;
         }
