@@ -24,18 +24,28 @@ const CHAT_DIRECTORY_TTL_MS = 60 * 1000;
 const { Client, LocalAuth } = WhatsAppWeb;
 
 class WhatsAppClientManager {
+    /**
+     * Creates one session lifecycle owner with an optional shared browser-boot queue.
+     */
     constructor(config = appConfig.whatsapp, {
         logger = console,
         onSelfCommand = null,
         buildSelfCommandErrorReply = null,
+        runClientBoot = operation => operation(),
     } = {}) {
         this.config = config;
+        this.runClientBoot = runClientBoot;
         this.logger = logger;
         this.onSelfCommand = onSelfCommand;
         this.buildSelfCommandErrorReply = buildSelfCommandErrorReply;
         this.client = null;
         this.initializingPromise = null;
         this.chatDirectoryRefreshPromise = null;
+        this.chatDirectoryRetryAt = 0;
+        this.chatDirectoryLoggedErrors = new Set();
+        this.reconnectTimer = null;
+        this.reconnectStopped = false;
+        this.destroyed = false;
         this.state = {
             clientId: config.clientId,
             status: "idle",
@@ -54,31 +64,54 @@ class WhatsAppClientManager {
             lastError: null,
             lastEventAt: null,
             disconnectReason: null,
+            reconnectAttempt: 0,
+            nextReconnectAt: null,
+            needsQrCode: false,
         };
     }
 
     /**
-     * Boots the singleton WhatsApp client when needed.
+     * Boots a usable client; state polls never bypass a scheduled or exhausted retry.
      */
-    async initialize() {
+    async initialize({ reconnect = false } = {}) {
+        if (this.destroyed || this.state.needsQrCode || (!reconnect && this.reconnectStopped)) {
+            return null;
+        }
+
         if (this.initializingPromise) {
             return this.initializingPromise;
         }
 
-        if (this.client) {
+        if (!reconnect && this.reconnectTimer) {
+            return null;
+        }
+
+        if (this.client && !["disconnected", "error"].includes(this.state.status)) {
             return this.client;
         }
 
         this.updateState({
             status: "initializing",
+            ready: false,
+            authenticated: false,
             lastError: null,
             disconnectReason: null,
         });
 
-        this.initializingPromise = this.initializeClient()
-            .catch(error => {
-                this.captureError(error, { status: "error" });
-                this.client = null;
+        this.initializingPromise = (async () => {
+            await this.disposeClient();
+            if (this.destroyed || this.state.needsQrCode) return null;
+            return this.runClientBoot(() => {
+                if (this.destroyed || this.state.needsQrCode) return null;
+                return this.initializeClient();
+            });
+        })()
+            .catch(async error => {
+                await this.disposeClient();
+                if (!this.destroyed && !this.state.needsQrCode) {
+                    this.captureError(error, { status: "error" });
+                    this.scheduleReconnect();
+                }
                 throw error;
             })
             .finally(() => {
@@ -86,6 +119,45 @@ class WhatsAppClientManager {
             });
 
         return this.initializingPromise;
+    }
+
+    /**
+     * Schedules a single rebuild, immediately first and then with bounded exponential backoff.
+     */
+    scheduleReconnect() {
+        const maximum = Math.max(0, this.config.reconnectMaxAttempts ?? 5);
+        if (this.destroyed || this.reconnectStopped || this.reconnectTimer || this.state.needsQrCode) return;
+        if (this.state.reconnectAttempt >= maximum) {
+            this.reconnectStopped = true;
+            this.updateState({ nextReconnectAt: null });
+            return;
+        }
+
+        const delay = this.state.reconnectAttempt === 0 ? 0 : Math.min(
+            this.config.reconnectMaxDelayMs ?? 30000,
+            (this.config.reconnectDelayMs ?? 1000) * (2 ** (this.state.reconnectAttempt - 1)),
+        );
+        this.updateState({ nextReconnectAt: new Date(Date.now() + delay).toISOString() });
+        const timer = setTimeout(async () => {
+            // A ready event may cancel recovery while an earlier boot is still unwinding.
+            await this.initializingPromise?.catch(() => {});
+            if (this.reconnectTimer !== timer) return;
+            this.reconnectTimer = null;
+            if (this.destroyed || this.reconnectStopped || this.state.needsQrCode) return;
+            this.updateState({ reconnectAttempt: this.state.reconnectAttempt + 1, nextReconnectAt: null });
+            await this.initialize({ reconnect: true }).catch(() => {});
+        }, delay);
+        this.reconnectTimer = timer;
+        timer.unref?.();
+    }
+
+    /**
+     * Cancels pending recovery before logout, shutdown, or a successful connection.
+     */
+    cancelReconnect() {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+        this.updateState({ nextReconnectAt: null });
     }
 
     /**
@@ -135,9 +207,14 @@ class WhatsAppClientManager {
      * Registers the WhatsApp lifecycle listeners used by the API and web UI.
      */
     registerLifecycleHandlers() {
-        this.client.on("qr", async qr => {
+        const activeClient = this.client;
+        const on = (event, handler) => activeClient.on(event, (...args) => {
+            if (this.client === activeClient && !this.destroyed) handler(...args);
+        });
+        on("qr", async qr => {
             try {
                 const qrCodeDataUrl = await QRCode.toDataURL(qr);
+                if (this.client !== activeClient || this.destroyed) return;
                 this.updateState({
                     status: "qr",
                     ready: false,
@@ -149,11 +226,11 @@ class WhatsAppClientManager {
                     lastError: null,
                 });
             } catch (error) {
-                this.captureError(error, { status: "error" });
+                if (this.client === activeClient && !this.destroyed) this.captureError(error, { status: "error" });
             }
         });
 
-        this.client.on("authenticated", () => {
+        on("authenticated", () => {
             this.updateState({
                 status: "authenticated",
                 authenticated: true,
@@ -166,9 +243,14 @@ class WhatsAppClientManager {
             });
         });
 
-        this.client.on("ready", () => {
+        on("ready", () => {
+            this.cancelReconnect();
+            this.reconnectStopped = false;
+            this.chatDirectoryRetryAt = 0;
             this.updateState({
                 status: "ready",
+                reconnectAttempt: 0,
+                needsQrCode: false,
                 ready: true,
                 authenticated: true,
                 hasQrCode: false,
@@ -184,9 +266,12 @@ class WhatsAppClientManager {
             });
         });
 
-        this.client.on("auth_failure", message => {
+        on("auth_failure", message => {
+            this.cancelReconnect();
+            this.reconnectStopped = true;
             this.updateState({
                 status: "auth_failure",
+                needsQrCode: true,
                 ready: false,
                 authenticated: false,
                 hasQrCode: false,
@@ -199,9 +284,12 @@ class WhatsAppClientManager {
                     at: new Date().toISOString(),
                 },
             });
+            this.disposeClient().catch(() => {});
         });
 
-        this.client.on("disconnected", reason => {
+        on("disconnected", reason => {
+            const loggedOut = ["LOGOUT", "UNPAIRED", "UNPAIRED_IDLE"]
+                .includes(String(reason || "").toUpperCase());
             this.updateState({
                 status: "disconnected",
                 ready: false,
@@ -212,16 +300,24 @@ class WhatsAppClientManager {
                 clientInfo: null,
                 chatDirectory: this.createEmptyChatDirectory(),
                 disconnectReason: String(reason || "unknown"),
+                needsQrCode: loggedOut,
             });
+            if (loggedOut) {
+                this.cancelReconnect();
+                this.reconnectStopped = true;
+                this.disposeClient().catch(() => {});
+                return;
+            }
+            this.scheduleReconnect();
         });
 
-        this.client.on("change_state", state => {
+        on("change_state", state => {
             this.updateState({
                 connectionState: state || null,
             });
         });
 
-        this.client.on("loading_screen", (percent, message) => {
+        on("loading_screen", (percent, message) => {
             this.updateState({
                 loading: {
                     percent: Number(percent || 0),
@@ -230,7 +326,7 @@ class WhatsAppClientManager {
             });
         });
 
-        this.client.on("message_create", message => {
+        on("message_create", message => {
             this.handleCreatedMessage(message).catch(error => {
                 this.logger.error(`Failed to process message command for session ${this.config.clientId}:`, error);
             });
@@ -325,14 +421,14 @@ class WhatsAppClientManager {
     }
 
     /**
-     * Refreshes the cached contact and group directory when the client is ready.
+     * Refreshes enrichment data when ready, retaining the cache and backing off on failure.
      */
     async refreshChatDirectory({ force = false } = {}) {
         if (!this.client || !this.isReady()) {
             return this.cloneChatDirectory(this.state.chatDirectory);
         }
 
-        if (!force && !this.shouldRefreshChatDirectory(this.state.chatDirectory)) {
+        if (Date.now() < this.chatDirectoryRetryAt || (!force && !this.shouldRefreshChatDirectory(this.state.chatDirectory))) {
             return this.cloneChatDirectory(this.state.chatDirectory);
         }
 
@@ -340,10 +436,25 @@ class WhatsAppClientManager {
             return await this.chatDirectoryRefreshPromise;
         }
 
+        const activeClient = this.client;
         this.chatDirectoryRefreshPromise = this.readChatDirectory()
             .then(chatDirectory => {
+                if (this.client !== activeClient || !this.isReady()) return this.cloneChatDirectory(this.state.chatDirectory);
+                this.chatDirectoryRetryAt = 0;
+                this.chatDirectoryLoggedErrors.clear();
                 this.updateState({ chatDirectory });
                 return this.cloneChatDirectory(chatDirectory);
+            })
+            .catch(error => {
+                if (this.client === activeClient) {
+                    this.chatDirectoryRetryAt = Date.now() + (this.config.chatDirectoryRetryMs ?? 30000);
+                    const message = String(error?.message || error);
+                    if (!this.chatDirectoryLoggedErrors.has(message)) {
+                        this.logger.error(`Could not refresh the chat directory for session ${this.config.clientId}:`, message);
+                        this.chatDirectoryLoggedErrors.add(message);
+                    }
+                }
+                return this.cloneChatDirectory(this.state.chatDirectory);
             })
             .finally(() => {
                 this.chatDirectoryRefreshPromise = null;
@@ -394,16 +505,37 @@ class WhatsAppClientManager {
             sentMessage = await this.client.sendMessage(chatId, normalizedMessage);
         }
 
+        const whatsappMessageId = this.readMessageId(sentMessage);
+        if (!whatsappMessageId) {
+            this.logger.warn(`WhatsApp send for session ${this.config.clientId} returned no message id.`);
+        }
+
         return {
             chatId,
             phoneNumber: normalizedTarget.phoneNumber,
             targetType: normalizedTarget.targetType,
             targetValue: normalizedTarget.targetValue,
-            whatsappMessageId: sentMessage?.id?._serialized || null,
+            whatsappMessageId,
             sentAt: sentMessage?.timestamp
                 ? new Date(sentMessage.timestamp * 1000).toISOString()
                 : new Date().toISOString(),
         };
+    }
+
+    /**
+     * Preserves identifiers supplied by WhatsApp, including raw model and component ids.
+     * An acknowledgement may arrive later; no unrelated event is guessed to belong to a send.
+     */
+    readMessageId(message) {
+        const candidates = [message?.id, message?._data?.id];
+        for (const id of candidates) {
+            if (typeof id?._serialized === "string" && id._serialized) return id._serialized;
+        }
+        for (const id of candidates) {
+            if (typeof id === "string" && id) return id;
+            if (typeof id?.id === "string" && id.id) return id.id;
+        }
+        return null;
     }
 
     /**
@@ -724,13 +856,13 @@ class WhatsAppClientManager {
     }
 
     /**
-     * Destroys the current client instance.
+     * Stops recovery and closes the client, including any boot still in flight.
      */
     async destroy() {
-        if (!this.client) {
-            return;
-        }
-
+        this.destroyed = true;
+        this.reconnectStopped = true;
+        this.cancelReconnect();
+        await this.initializingPromise?.catch(() => {});
         await this.disposeClient();
         this.updateState({
             status: "idle",
@@ -755,6 +887,7 @@ class WhatsAppClientManager {
 
         const activeClient = this.client;
         this.client = null;
+        activeClient.removeAllListeners?.();
         await activeClient.destroy?.().catch(() => {});
     }
 

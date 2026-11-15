@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { appConfig } from "../config/app-config.js";
 import { normalizeMessageTarget } from "../helpers/message-target.js";
 import { normalizeSessionId } from "../helpers/session.js";
@@ -11,6 +13,9 @@ import { WhatsAppClientManager } from "./whatsapp-client-manager.js";
  * Manages multiple WhatsApp Web sessions for the API runtime.
  */
 class WhatsAppSessionManager {
+    /**
+     * Creates the registry and shared boot queue used by all session lifecycle owners.
+     */
     constructor({
         config = appConfig.whatsapp,
         scheduledMessageModel = ScheduledMessage,
@@ -22,21 +27,77 @@ class WhatsAppSessionManager {
         this.logger = logger;
         this.scheduledMessageModel = scheduledMessageModel;
         this.sessions = new Map();
+        this.restorationPromise = null;
+        this.clientBootPromise = Promise.resolve();
+        this.destroyed = false;
         this.sessionAccessStore = sessionAccessStore;
         this.clientFactory = clientFactory || (sessionConfig => new WhatsAppClientManager(sessionConfig, {
             logger: this.logger,
+            runClientBoot: operation => this.runClientBoot(operation),
             onSelfCommand: command => this.handleSelfCommand(command),
             buildSelfCommandErrorReply: error => this.buildCommandErrorReply(error),
         }));
     }
 
     /**
-     * Initializes the default session used by the existing scheduler flow.
+     * Serializes browser boots, including retries, so startup recovery cannot saturate the host.
+     */
+    runClientBoot(operation) {
+        const boot = this.clientBootPromise.then(operation);
+        this.clientBootPromise = boot.catch(() => {});
+        return boot;
+    }
+
+    /**
+     * Initializes the registry, then restores persisted profiles sequentially in the background.
      */
     async initialize() {
         await this.sessionAccessStore.initialize();
-        await this.ensureSession(this.getDefaultSessionId());
+        if (!this.restorationPromise && !this.destroyed) {
+            this.restorationPromise = this.restoreSessions().catch(error => {
+                this.logger.error("Could not restore WhatsApp sessions:", error?.message || error);
+            });
+        }
         return this;
+    }
+
+    /**
+     * Restores known profiles without letting one failed Chromium boot stop the others.
+     */
+    async restoreSessions() {
+        const sessionIds = [...new Set([
+            this.getDefaultSessionId(),
+            ...await this.sessionAccessStore.listSessionIds(),
+        ])];
+        for (const sessionId of sessionIds) {
+            if (this.destroyed) return;
+            try {
+                if (!await this.hasAuthProfile(sessionId) || this.destroyed) continue;
+                await this.ensureSession(sessionId);
+            } catch (error) {
+                this.logger.error(`Could not restore WhatsApp session ${sessionId}:`, error?.message || error);
+            }
+        }
+    }
+
+    /**
+     * Checks for WhatsApp IndexedDB data; an empty Chromium profile cannot restore pairing.
+     * Existing storage is only a restoration candidate, not proof that credentials are valid.
+     */
+    async hasAuthProfile(sessionId) {
+        const storagePath = path.join(this.config.authPath, `session-${normalizeSessionId(sessionId)}`,
+            "Default", "IndexedDB");
+        try {
+            const entries = await fs.readdir(storagePath, { withFileTypes: true });
+            for (const entry of entries) {
+                if (entry.isDirectory() && entry.name.startsWith("https_web.whatsapp.com_")
+                    && (await fs.readdir(path.join(storagePath, entry.name))).length > 0) return true;
+            }
+            return false;
+        } catch (error) {
+            if (error?.code === "ENOENT") return false;
+            throw error;
+        }
     }
 
     /**
@@ -78,6 +139,7 @@ class WhatsAppSessionManager {
      * Ensures one session client exists and has begun initialization.
      */
     async ensureSession(sessionId = this.getDefaultSessionId()) {
+        if (this.destroyed) throw new Error("WhatsApp sessions have been stopped.");
         const normalizedSessionId = normalizeSessionId(sessionId);
         const existingSession = this.sessions.get(normalizedSessionId);
 
@@ -93,21 +155,21 @@ class WhatsAppSessionManager {
 
         this.sessions.set(normalizedSessionId, session);
 
-        try {
-            await session.initialize();
-            return session;
-        } catch (error) {
-            this.sessions.delete(normalizedSessionId);
-            throw error;
-        }
+        // Keep a failed client manager registered: it owns the bounded recovery timer.
+        await session.initialize();
+        return session;
     }
 
     /**
-     * Returns the current state for one session, creating it on demand when needed.
+     * Returns session state, including a failed boot's retry state, and boots absent sessions on demand.
      */
     async getSessionState(sessionId = this.getDefaultSessionId()) {
         const normalizedSessionId = normalizeSessionId(sessionId);
-        const session = await this.ensureSession(normalizedSessionId);
+        const initialization = this.ensureSession(normalizedSessionId);
+        const session = this.sessions.get(normalizedSessionId) || await initialization;
+        // State reads must expose progress while Chromium boots, including a pending retry.
+        // The retained client manager records boot failures and owns subsequent recovery.
+        initialization.catch(() => {});
 
         if (session.isReady()) {
             // Reading the contact directory is enrichment, not a prerequisite for sending: when
@@ -172,6 +234,9 @@ class WhatsAppSessionManager {
                 lastError: null,
                 lastEventAt: null,
                 disconnectReason: null,
+                reconnectAttempt: 0,
+                nextReconnectAt: null,
+                needsQrCode: false,
             };
         }
 
@@ -207,6 +272,7 @@ class WhatsAppSessionManager {
      * Destroys every active WhatsApp session.
      */
     async destroy() {
+        this.destroyed = true;
         const sessions = [...this.sessions.values()];
         this.sessions.clear();
         await Promise.all(sessions.map(session => session.destroy().catch(() => {})));
