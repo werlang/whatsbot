@@ -714,3 +714,70 @@ test("directory rejects address-shaped labels as names on both sources", async (
         assert.equal(directory.contacts.some(entry => entry.id === "555391565003@c.us"), false);
     }
 });
+
+test("directory keeps a real name behind an address-shaped label and preserves numeric group titles", async () => {
+    const entries = [
+        {
+            id: { _serialized: "555391565003@c.us" },
+            name: "+55 (53) 91565-003",
+            contact: { name: "Real Saved Name" },
+        },
+        { id: { _serialized: "555195171104@c.us" }, name: "555195171104@c.us" },
+        { id: { _serialized: "120363043210123456@g.us" }, name: "2026", isGroup: true },
+    ];
+
+    for (const source of ["chats", "contacts"]) {
+        const client = source === "chats"
+            ? { async getChats() { return entries; }, async getContacts() { throw new Error("unexpected"); } }
+            : { async getChats() { throw primaryError; }, async getContacts() { return entries; } };
+        const manager = createReadyManager(client);
+
+        const directory = await manager.refreshChatDirectory({ force: true });
+        const byId = new Map(directory.contacts.map(entry => [entry.id, entry]));
+
+        assert.equal(byId.get("555391565003@c.us")?.name, "Real Saved Name", `${source}: real name must survive a phone-shaped label`);
+        assert.equal(byId.has("555195171104@c.us"), false, `${source}: an address is not a name`);
+        assert.equal(directory.groups[0]?.name, "2026", `${source}: a numeric group title must stay a title`);
+    }
+});
+
+test("a replacement client does not inherit a pending directory refresh", async () => {
+    let settlePrimaryChats;
+    const pendingPrimaryChats = new Promise(resolve => {
+        settlePrimaryChats = resolve;
+    });
+    const primaryClient = {
+        getChats() {
+            return pendingPrimaryChats;
+        },
+        async getContacts() {
+            return mixedContacts;
+        },
+    };
+    const manager = createReadyManager(primaryClient);
+
+    const staleRefresh = manager.refreshChatDirectory({ force: true });
+
+    let replacementChatCalls = 0;
+    const replacementClient = {
+        async getChats() {
+            replacementChatCalls += 1;
+            return [{ id: { _serialized: "5551999999999@c.us" }, name: "Replacement" }];
+        },
+        async getContacts() {
+            throw new Error("replacement contacts must not be read");
+        },
+    };
+    manager.client = replacementClient;
+
+    const replacementDirectory = await manager.refreshChatDirectory({ force: true });
+
+    assert.equal(replacementChatCalls, 1, "the replacement must run its own read");
+
+    settlePrimaryChats(mixedContacts);
+    const staleResult = await staleRefresh;
+
+    assert.deepEqual(replacementDirectory.contacts.map(entry => entry.name), ["Replacement"]);
+    assert.deepEqual(staleResult.contacts.map(entry => entry.name), ["Replacement"], "the stale operation must not overwrite the replacement");
+    assert.deepEqual(manager.state.chatDirectory.contacts.map(entry => entry.name), ["Replacement"]);
+});

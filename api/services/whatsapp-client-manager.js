@@ -24,6 +24,24 @@ const ptBrCollator = new Intl.Collator("pt-BR");
 /**
  * Manages the single whatsapp-web.js client used by the API runtime.
  */
+/**
+ * Reports whether one directory label is really an address (bare digits, a formatted phone number
+ * or a serialized chat id) instead of a name a person would recognise.
+ */
+function isAddressShapedLabel(value) {
+    const trimmed = String(value ?? "").trim();
+
+    if (!trimmed) {
+        return true;
+    }
+
+    if (/^[\d\s()+.\-]+$/.test(trimmed)) {
+        return true;
+    }
+
+    return /^\d+@[cg]\.us$/i.test(trimmed);
+}
+
 const { Client, LocalAuth } = WhatsAppWeb;
 
 class WhatsAppClientManager {
@@ -436,11 +454,15 @@ class WhatsAppClientManager {
             return this.cloneChatDirectory(this.state.chatDirectory);
         }
 
-        if (this.chatDirectoryRefreshPromise) {
+        // A refresh belongs to the client that started it. Same client: share it. Replacement:
+        // start its own read and take over the slot, so a stale operation that may never settle
+        // (a disposed browser keeps it pending) cannot stall the new one.
+        if (this.chatDirectoryRefreshPromise && this.chatDirectoryRefreshClient === this.client) {
             return await this.chatDirectoryRefreshPromise;
         }
 
         const activeClient = this.client;
+        this.chatDirectoryRefreshClient = activeClient;
         let usedFallback = false;
         this.chatDirectoryRefreshPromise = this.readChatDirectory({
             onSourceSelected: result => {
@@ -474,7 +496,12 @@ class WhatsAppClientManager {
                 return this.cloneChatDirectory(this.state.chatDirectory);
             })
             .finally(() => {
-                this.chatDirectoryRefreshPromise = null;
+                // Only the owner clears the shared slot; a newer refresh must not be detached by
+                // this operation finishing late.
+                if (this.chatDirectoryRefreshClient === activeClient) {
+                    this.chatDirectoryRefreshPromise = null;
+                    this.chatDirectoryRefreshClient = null;
+                }
             });
 
         return await this.chatDirectoryRefreshPromise;
@@ -743,7 +770,9 @@ class WhatsAppClientManager {
                 continue;
             }
 
-            const name = this.readDirectoryName(entry);
+            const name = this.readDirectoryName(entry, {
+                allowAddressLabel: target.targetType === GROUP_TARGET_TYPE,
+            });
             const existing = entriesById.get(target.id);
 
             if (!existing || (!existing.name && name)) {
@@ -841,8 +870,8 @@ class WhatsAppClientManager {
      * @param {object} entry Raw WhatsApp chat or contact model.
      * @returns {string|null} Trimmed display name or null when unnamed.
      */
-    readDirectoryName(entry) {
-        const candidate = [
+    readDirectoryName(entry, { allowAddressLabel = false } = {}) {
+        const candidates = [
             entry?.name,
             entry?.formattedTitle,
             entry?.contact?.name,
@@ -852,17 +881,30 @@ class WhatsAppClientManager {
             entry?.pushname,
             entry?.shortName,
             entry?.verifiedName,
-        ].find(value => typeof value === "string" && value.trim());
-
-        if (!candidate) {
-            return null;
-        }
-
-        const trimmed = candidate.trim();
+        ];
 
         // WhatsApp fills formattedTitle with the number when the contact has no saved name; an
-        // address is not a name, and offering it in the picker would invite a guess.
-        return /^[\d\s()+.\-]+$/.test(trimmed) ? null : trimmed;
+        // address is not a name. Skip such labels and keep looking for a real name further down
+        // the list instead of discarding the entry wholesale.
+        for (const value of candidates) {
+            if (typeof value !== "string") {
+                continue;
+            }
+
+            const trimmed = value.trim();
+            if (!trimmed) {
+                continue;
+            }
+
+            // A group is addressed by its @g.us id, so a numeric title ("2026") is a real name.
+            if (!allowAddressLabel && isAddressShapedLabel(trimmed)) {
+                continue;
+            }
+
+            return trimmed;
+        }
+
+        return null;
     }
 
     /**
