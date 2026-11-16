@@ -17,6 +17,11 @@ const CHROMIUM_SINGLETON_ARTIFACTS = [
 
 const BRAZIL_COUNTRY_CODE = "55";
 const CHAT_DIRECTORY_TTL_MS = 60 * 1000;
+const AVATAR_CACHE_HIT_TTL_MS = 15 * 60 * 1000;
+const AVATAR_CACHE_MISS_TTL_MS = 2 * 60 * 1000;
+const AVATAR_MAX_IN_FLIGHT = 4;
+const AVATAR_MAX_QUEUED = 32;
+const AVATAR_LOOKUP_TIMEOUT_MS = 5000;
 const DIRECTORY_CONTACT_ID_PATTERN = /^(\d+)@c\.us$/i;
 const DIRECTORY_GROUP_ID_PATTERN = /^(\d+(?:-\d+)?)@g\.us$/i;
 const ptBrCollator = new Intl.Collator("pt-BR");
@@ -97,6 +102,11 @@ class WhatsAppClientManager {
             nextReconnectAt: null,
             needsQrCode: false,
         };
+        this.avatarCache = new Map();
+        this.avatarInFlight = new Map();
+        this.avatarActiveCount = 0;
+        this.avatarWaiters = [];
+        this.avatarGeneration = 0;
     }
 
     /**
@@ -611,6 +621,241 @@ class WhatsAppClientManager {
     }
 
     /**
+     * Resolves one profile picture URL through the ready client.
+     *
+     * The cache, single-flight map and concurrency slots belong to this client manager, so two
+     * sessions can never share a profile URL. A missing photo is cached as null for two minutes;
+     * an existing URL stays valid for fifteen minutes. At most four lookups run at once and every
+     * caller gives up after five seconds.
+     *
+     * @param {{ targetType?: string, targetValue?: string, phoneNumber?: string }} target Canonical message target.
+     * @returns {Promise<string|null>} Profile picture URL or null when WhatsApp has no photo.
+     */
+    async getProfilePicUrl(target) {
+        const normalizedTarget = normalizeMessageTarget(
+            typeof target === "string"
+                ? { phoneNumber: target }
+                : target,
+        );
+
+        if (!this.client || !this.isReady()) {
+            throw new HttpError(503, "WhatsApp client is not ready to load profile pictures.");
+        }
+
+        const jid = normalizedTarget.targetType === GROUP_TARGET_TYPE
+            ? normalizedTarget.targetValue
+            : `${normalizedTarget.phoneNumber}@c.us`;
+        const cached = this.readAvatarCache(jid);
+        if (cached.hit) {
+            return cached.url;
+        }
+
+        const existingLookup = this.avatarInFlight.get(jid);
+        if (existingLookup) {
+            return await existingLookup;
+        }
+
+        const generation = this.avatarGeneration;
+        const lookup = this.resolveAvatarLookup(jid, generation, Date.now() + AVATAR_LOOKUP_TIMEOUT_MS);
+
+        this.avatarInFlight.set(jid, lookup);
+        lookup
+            .finally(() => {
+                if (this.avatarInFlight.get(jid) === lookup) {
+                    this.avatarInFlight.delete(jid);
+                }
+            })
+            .catch(() => {});
+
+        return await lookup;
+    }
+
+    /**
+     * Reads one avatar cache entry while discarding expired entries.
+     *
+     * @param {string} jid Canonical WhatsApp chat id.
+     * @returns {{ hit: boolean, url: string|null }} Cache result.
+     */
+    readAvatarCache(jid) {
+        const cached = this.avatarCache.get(jid);
+
+        if (!cached) {
+            return { hit: false, url: null };
+        }
+
+        if (cached.expiresAt <= Date.now()) {
+            this.avatarCache.delete(jid);
+            return { hit: false, url: null };
+        }
+
+        return { hit: true, url: cached.url };
+    }
+
+    /**
+     * Stores one profile picture lookup with the TTL that matches a photo or a missing photo.
+     *
+     * @param {string} jid Canonical WhatsApp chat id.
+     * @param {string|null} url Resolved URL.
+     */
+    writeAvatarCache(jid, url) {
+        this.avatarCache.set(jid, {
+            url: url || null,
+            expiresAt: Date.now() + (url ? AVATAR_CACHE_HIT_TTL_MS : AVATAR_CACHE_MISS_TTL_MS),
+        });
+    }
+
+    /**
+     * Clears profile picture state when the underlying browser client is disposed.
+     *
+     * In-flight operations keep their slots until they settle, but their results can no longer be
+     * cached or served to the replacement client because the generation changes.
+     */
+    clearAvatarCache() {
+        this.avatarGeneration += 1;
+        this.avatarCache.clear();
+        this.avatarInFlight.clear();
+
+        const waiters = this.avatarWaiters.splice(0);
+        for (const waiter of waiters) {
+            clearTimeout(waiter.timer);
+            waiter.reject(new HttpError(503, "WhatsApp client was replaced."));
+        }
+    }
+
+    /**
+     * Resolves one avatar lookup with the concurrency slot and deadline applied.
+     *
+     * @param {string} jid Canonical WhatsApp chat id.
+     * @param {number} generation Client generation captured at request time.
+     * @param {number} deadline Absolute deadline in milliseconds.
+     * @returns {Promise<string|null>} Profile picture URL or null.
+     */
+    async resolveAvatarLookup(jid, generation, deadline) {
+        await this.acquireAvatarSlot(deadline);
+
+        try {
+            if (generation !== this.avatarGeneration || !this.client || !this.isReady()) {
+                throw new HttpError(503, "WhatsApp client is not ready to load profile pictures.");
+            }
+
+            // A queued lookup may inherit a result that landed while it waited for a slot.
+            const cached = this.readAvatarCache(jid);
+            if (cached.hit) {
+                return cached.url;
+            }
+
+            const client = this.client;
+            const rawUrl = await this.withAvatarDeadline(client.getProfilePicUrl(jid), deadline);
+            const url = typeof rawUrl === "string" && rawUrl.trim() ? rawUrl.trim() : null;
+
+            if (generation === this.avatarGeneration) {
+                this.writeAvatarCache(jid, url);
+            }
+
+            return url;
+        } catch (error) {
+            if (error instanceof HttpError) {
+                throw error;
+            }
+
+            throw new HttpError(503, "Could not load the profile picture from WhatsApp.", error);
+        } finally {
+            this.releaseAvatarSlot();
+        }
+    }
+
+    /**
+     * Acquires one of the four profile picture lookup slots, waiting until the deadline.
+     *
+     * @param {number} deadline Absolute deadline in milliseconds.
+     * @returns {Promise<void>} Resolves when a slot is owned.
+     */
+    async acquireAvatarSlot(deadline) {
+        if (this.avatarActiveCount < AVATAR_MAX_IN_FLIGHT) {
+            this.avatarActiveCount += 1;
+            return;
+        }
+
+        if (Date.now() >= deadline) {
+            throw new HttpError(503, "Profile picture lookup timed out.");
+        }
+
+        if (this.avatarWaiters.length >= AVATAR_MAX_QUEUED) {
+            throw new HttpError(503, "Profile picture lookup capacity is exhausted.");
+        }
+
+        await new Promise((resolve, reject) => {
+            const waiter = {
+                timer: null,
+                resolve: () => {
+                    clearTimeout(waiter.timer);
+                    resolve();
+                },
+                reject: error => {
+                    clearTimeout(waiter.timer);
+                    reject(error);
+                },
+            };
+
+            waiter.timer = setTimeout(() => {
+                const index = this.avatarWaiters.indexOf(waiter);
+                if (index >= 0) {
+                    this.avatarWaiters.splice(index, 1);
+                }
+                reject(new HttpError(503, "Profile picture lookup timed out."));
+            }, Math.max(0, deadline - Date.now()));
+
+            this.avatarWaiters.push(waiter);
+        });
+    }
+
+    /**
+     * Releases one slot directly or transfers it to the oldest waiter.
+     */
+    releaseAvatarSlot() {
+        const waiter = this.avatarWaiters.shift();
+
+        if (waiter) {
+            // The granted slot is already counted in avatarActiveCount.
+            waiter.resolve();
+            return;
+        }
+
+        this.avatarActiveCount = Math.max(0, this.avatarActiveCount - 1);
+    }
+
+    /**
+     * Races one profile picture lookup against its absolute deadline.
+     *
+     * @param {Promise<string|undefined>} lookup Library lookup.
+     * @param {number} deadline Absolute deadline in milliseconds.
+     * @returns {Promise<string|undefined>} Raw library result.
+     */
+    async withAvatarDeadline(lookup, deadline) {
+        const remainingMs = deadline - Date.now();
+
+        if (remainingMs <= 0) {
+            throw new HttpError(503, "Profile picture lookup timed out.");
+        }
+
+        let timer = null;
+
+        try {
+            return await Promise.race([
+                lookup,
+                new Promise((_resolve, reject) => {
+                    timer = setTimeout(
+                        () => reject(new HttpError(503, "Profile picture lookup timed out.")),
+                        remainingMs,
+                    );
+                }),
+            ]);
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    /**
      * Resolves the best WhatsApp chat id for one phone number before sending.
      */
     async resolveWhatsAppChatId(phoneNumber) {
@@ -982,6 +1227,7 @@ class WhatsAppClientManager {
      * Removes the current client reference after attempting a clean shutdown.
      */
     async disposeClient() {
+        this.clearAvatarCache();
         this.chatDirectoryPrimaryOutageLogged = false;
         if (!this.client) {
             return;

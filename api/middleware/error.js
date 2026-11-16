@@ -5,6 +5,7 @@ const ERROR_TYPES = {
     404: 'Not Found',
     409: 'Conflict',
     500: 'Internal Server Error',
+    503: 'Service Unavailable',
 };
 
 /**

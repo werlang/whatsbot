@@ -1,8 +1,34 @@
 import express from "express";
 import { HttpError } from "../helpers/error.js";
+import { GROUP_TARGET_TYPE, normalizeMessageTarget } from "../helpers/message-target.js";
 import { sendSuccess } from "../helpers/response.js";
 import { normalizeSessionId } from "../helpers/session.js";
 import { whatsappSessionManager as defaultWhatsAppSessionManager } from "../services/whatsapp-session-manager.js";
+
+/**
+ * Reports whether one normalized target exists in a cached session directory snapshot.
+ *
+ * @param {{ contacts?: Array<object>, groups?: Array<object> }} [chatDirectory] Cached directory.
+ * @param {{ targetType: string, targetValue: string, phoneNumber: string|null }} target Normalized target.
+ * @returns {boolean} True when the target is addressable from the cached snapshot.
+ */
+function isTargetInChatDirectory(chatDirectory, target) {
+    const entries = target.targetType === GROUP_TARGET_TYPE
+        ? chatDirectory?.groups
+        : chatDirectory?.contacts;
+    const expectedValues = new Set([target.targetValue.toLowerCase()]);
+
+    if (target.targetType !== GROUP_TARGET_TYPE && target.phoneNumber) {
+        expectedValues.add(target.phoneNumber.toLowerCase());
+        expectedValues.add(`${target.phoneNumber}@c.us`.toLowerCase());
+    }
+
+    return (Array.isArray(entries) ? entries : []).some(entry => (
+        [entry?.targetValue, entry?.id, entry?.chatId, entry?.phoneNumber]
+            .filter(value => typeof value === "string" || typeof value === "number")
+            .some(value => expectedValues.has(String(value).trim().toLowerCase()))
+    ));
+}
 
 /**
  * Builds the WhatsApp session routes with an injectable client manager.
@@ -70,6 +96,49 @@ function createWhatsAppRouter({ whatsappClientManager = defaultWhatsAppSessionMa
             return next(error instanceof HttpError
                 ? error
                 : new HttpError(500, "Could not load the WhatsApp session state.", error));
+        }
+    });
+
+    router.get("/sessions/:sessionId/avatar", async (req, res, next) => {
+        // Error envelopes must carry the same no-store contract as successful lookups.
+        res.setHeader("Cache-Control", "private, no-store");
+
+        try {
+            const sessionId = normalizeSessionId(req.params.sessionId, { required: true });
+
+            // Authorization is the first thing that touches session state. A rejected token must
+            // never cause a directory read or a client lookup.
+            await whatsappClientManager.assertAuthorizedSession(sessionId, readSessionToken(req));
+
+            const target = normalizeMessageTarget({
+                targetType: req.query.targetType,
+                targetValue: req.query.targetValue,
+            });
+            const session = await whatsappClientManager.getSessionState(sessionId);
+
+            if (!session?.ready) {
+                throw new HttpError(503, "WhatsApp session is not ready to load profile pictures.");
+            }
+
+            if (!isTargetInChatDirectory(session.chatDirectory, target)) {
+                throw new HttpError(404, "Target is not in the session contact directory.");
+            }
+
+            const url = await whatsappClientManager.getProfilePicUrl(sessionId, target);
+
+            return sendSuccess(res, {
+                data: {
+                    avatar: {
+                        targetType: target.targetType,
+                        targetValue: target.targetValue,
+                        url: typeof url === "string" && url.trim() ? url.trim() : null,
+                    },
+                },
+            });
+        } catch (error) {
+            return next(error instanceof HttpError
+                ? error
+                : new HttpError(503, "Could not load the profile picture.", error));
         }
     });
 

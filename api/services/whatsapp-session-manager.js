@@ -209,6 +209,20 @@ class WhatsAppSessionManager {
     }
 
     /**
+     * Resolves one profile picture URL through the session's own ready client.
+     *
+     * @param {string} sessionId Session identifier.
+     * @param {{ targetType?: string, targetValue?: string, phoneNumber?: string }} target Canonical target.
+     * @returns {Promise<string|null>} Profile picture URL or null when WhatsApp has no photo.
+     */
+    async getProfilePicUrl(sessionId, target) {
+        const normalizedSessionId = normalizeSessionId(sessionId);
+        const session = await this.ensureSession(normalizedSessionId);
+
+        return await session.getProfilePicUrl(target);
+    }
+
+    /**
      * Returns one sync snapshot when the session is already active in memory.
      */
     getKnownSessionState(sessionId = this.getDefaultSessionId()) {
