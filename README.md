@@ -27,13 +27,15 @@ The API uses:
 
 Current HTTP routes:
 
-- `POST /messages`
-  - body: `{ sessionId?, phoneNumber, message, scheduledFor }`
+- `POST /messages` and `PUT /messages/:scheduledMessageId`
+  - body: `{ sessionId?, phoneNumber | targetValue | recipient, targetType?, message, scheduledFor }`
+  - `phoneNumber` / `targetValue` accept strict contact digits (10–15 digits or `<digits>@c.us`) or group chat ids (`<digits>@g.us` or `<digits>-<digits>@g.us`); formatted phone strings and `@lid` identifiers are rejected with HTTP 400
+  - `recipient` resolves a single case/diacritic-insensitive contact or group name within the authorized session's `chatDirectory` (cannot be combined with non-null `phoneNumber` or `targetValue`; returns HTTP 400 when missing or ambiguous)
   - `scheduledFor` must include timezone information
-  - `sessionId` defaults to `main` when omitted
-  - returns the created scheduled message in the standard envelope
+  - `sessionId` defaults to `main` when omitted on `POST` and cannot be changed on `PUT`
+  - returns the created or updated scheduled message in the standard envelope (without persisting `recipient`)
 - `GET /whatsapp/session`
-  - accepts optional `sessionId` query string and returns the current session state, including QR data when pairing is required
+  - accepts optional `sessionId` query string and returns the current session state, including QR data when pairing is required, and `chatDirectory` (`{ contacts, groups, refreshedAt }`) with `{ id, name, targetType, targetValue, phoneNumber, chatId, label }` entries
 - `POST /whatsapp/sessions`
   - creates one new WhatsApp app session with its own `LocalAuth` profile
 - `GET /whatsapp/sessions/:sessionId`
@@ -48,7 +50,7 @@ After the access registry initializes, startup restores the default session and 
 
 A dropped connection or failed boot triggers up to five automatic rebuilds: the first immediately, then after 1, 2, 4, and 8 seconds (delays are capped at 30 seconds when configured for more attempts). A ready event resets the retry budget. State responses add `reconnectAttempt`, `nextReconnectAt`, and `needsQrCode`, and return progress without waiting for an in-flight browser boot. Logout, unpaired states, and authentication failures stop recovery, close the client, and report `needsQrCode: true`. Polling does not restart exhausted or logged-out sessions.
 
-Chat-directory failures preserve the last directory, retry after 30 seconds, and log each distinct failure once until a successful refresh. Sending remains available when enrichment fails. Sends preserve supplied serialized, raw-model, string, or component message ids; if WhatsApp returns none, the id stays null and a warning is logged. Message ids do not require a delivery acknowledgement.
+Chat-directory acquisition tries `getChats()` first and falls back to `getContacts()` only when `getChats()` throws (logging primary unavailability once until recovery). Both sources exclude `@lid`, broadcast, malformed ids, and unnamed people, deduplicate by canonical id, and sort in `pt-BR` order. Both-source failures preserve the last directory, retry after 30 seconds, and log each distinct failure once until a successful refresh. Sending remains available when enrichment fails. Sends preserve supplied serialized, raw-model, string, or component message ids; if WhatsApp returns none, the id stays null and a warning is logged. Message ids do not require a delivery acknowledgement.
 
 Self-command scheduling is also supported per session. When a paired user sends a message to their own chat in the format below, the API converts it into a scheduled message owned by that session:
 

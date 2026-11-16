@@ -17,6 +17,9 @@ const CHROMIUM_SINGLETON_ARTIFACTS = [
 
 const BRAZIL_COUNTRY_CODE = "55";
 const CHAT_DIRECTORY_TTL_MS = 60 * 1000;
+const DIRECTORY_CONTACT_ID_PATTERN = /^(\d+)@c\.us$/i;
+const DIRECTORY_GROUP_ID_PATTERN = /^(\d+(?:-\d+)?)@g\.us$/i;
+const ptBrCollator = new Intl.Collator("pt-BR");
 
 /**
  * Manages the single whatsapp-web.js client used by the API runtime.
@@ -43,6 +46,7 @@ class WhatsAppClientManager {
         this.chatDirectoryRefreshPromise = null;
         this.chatDirectoryRetryAt = 0;
         this.chatDirectoryLoggedErrors = new Set();
+        this.chatDirectoryPrimaryOutageLogged = false;
         this.reconnectTimer = null;
         this.reconnectStopped = false;
         this.destroyed = false;
@@ -437,9 +441,22 @@ class WhatsAppClientManager {
         }
 
         const activeClient = this.client;
-        this.chatDirectoryRefreshPromise = this.readChatDirectory()
+        let usedFallback = false;
+        this.chatDirectoryRefreshPromise = this.readChatDirectory({
+            onSourceSelected: result => {
+                usedFallback = Boolean(result?.usedFallback);
+            },
+        })
             .then(chatDirectory => {
                 if (this.client !== activeClient || !this.isReady()) return this.cloneChatDirectory(this.state.chatDirectory);
+                if (usedFallback) {
+                    if (!this.chatDirectoryPrimaryOutageLogged) {
+                        this.logger.warn?.(`WhatsApp chat directory primary source unavailable for session ${this.config.clientId}; using contacts.`);
+                        this.chatDirectoryPrimaryOutageLogged = true;
+                    }
+                } else {
+                    this.chatDirectoryPrimaryOutageLogged = false;
+                }
                 this.chatDirectoryRetryAt = 0;
                 this.chatDirectoryLoggedErrors.clear();
                 this.updateState({ chatDirectory });
@@ -664,32 +681,45 @@ class WhatsAppClientManager {
     }
 
     /**
-     * Builds the latest cached contact and group directory from WhatsApp chats.
+     * Reads raw directory entries from chats, falling back to contacts only when getChats() throws.
+     *
+     * @returns {Promise<{ entries: Array<object>, usedFallback: boolean }>} Directory source entries and origin flag.
      */
-    async readChatDirectory() {
-        const chats = await this.client.getChats();
-        const contacts = [];
-        const groups = [];
+    async readDirectorySource() {
+        // Acquisition is bound to the client captured before the first await: a browser replaced
+        // mid-read must never receive the fallback call, and its own refresh must not inherit this
+        // operation's outcome.
+        const client = this.client;
 
-        for (const chat of chats) {
-            const directoryEntry = await this.readDirectoryEntry(chat);
-
-            if (!directoryEntry) {
-                continue;
+        try {
+            const entries = await client.getChats();
+            return {
+                entries: Array.isArray(entries) ? entries : [],
+                usedFallback: false,
+            };
+        } catch (primaryError) {
+            if (typeof client?.getContacts !== "function" || this.client !== client) {
+                throw primaryError;
             }
 
-            if (directoryEntry.targetType === GROUP_TARGET_TYPE) {
-                groups.push(directoryEntry);
-                continue;
-            }
-
-            contacts.push(directoryEntry);
+            const entries = await client.getContacts();
+            return {
+                entries: Array.isArray(entries) ? entries : [],
+                usedFallback: true,
+            };
         }
+    }
 
-        const sortEntries = (left, right) => left.label.localeCompare(right.label);
-
-        contacts.sort(sortEntries);
-        groups.sort(sortEntries);
+    /**
+     * Builds the latest cached contact and group directory from WhatsApp chats or contacts.
+     *
+     * @param {{ onSourceSelected?: (meta: { usedFallback: boolean }) => void }} [options] Optional acquisition hook.
+     * @returns {Promise<{ contacts: Array<object>, groups: Array<object>, refreshedAt: string }>} Directory snapshot.
+     */
+    async readChatDirectory({ onSourceSelected } = {}) {
+        const { entries, usedFallback } = await this.readDirectorySource();
+        onSourceSelected?.({ usedFallback });
+        const { contacts, groups } = this.normalizeDirectoryEntries(entries);
 
         return {
             contacts,
@@ -699,138 +729,140 @@ class WhatsAppClientManager {
     }
 
     /**
-     * Normalizes one WhatsApp chat into one directory entry.
+     * Normalizes, deduplicates, filters, and sorts raw chat or contact models into directory entries.
+     *
+     * @param {Array<object>} entries Raw WhatsApp chat or contact models.
+     * @returns {{ contacts: Array<object>, groups: Array<object> }} Sorted contact and group directory lists.
      */
-    async readDirectoryEntry(chat) {
-        const chatId = chat?.id?._serialized || null;
+    normalizeDirectoryEntries(entries) {
+        const entriesById = new Map();
 
-        if (!chatId || chatId.endsWith("@broadcast") || chatId === "status@broadcast") {
+        for (const entry of Array.isArray(entries) ? entries : []) {
+            const target = this.parseDirectoryTarget(entry);
+            if (!target) {
+                continue;
+            }
+
+            const name = this.readDirectoryName(entry);
+            const existing = entriesById.get(target.id);
+
+            if (!existing || (!existing.name && name)) {
+                entriesById.set(target.id, { ...target, name });
+            }
+        }
+
+        const contacts = [];
+        const groups = [];
+
+        for (const entry of entriesById.values()) {
+            if (entry.targetType === GROUP_TARGET_TYPE) {
+                const displayName = entry.name || entry.id;
+                groups.push({
+                    id: entry.id,
+                    name: displayName,
+                    targetType: GROUP_TARGET_TYPE,
+                    targetValue: entry.id,
+                    phoneNumber: null,
+                    chatId: entry.id,
+                    label: displayName,
+                });
+                continue;
+            }
+
+            if (!entry.name) {
+                continue;
+            }
+
+            contacts.push({
+                id: entry.id,
+                name: entry.name,
+                targetType: CONTACT_TARGET_TYPE,
+                targetValue: entry.targetValue,
+                phoneNumber: entry.phoneNumber,
+                chatId: entry.id,
+                label: entry.name,
+            });
+        }
+
+        const compareEntries = (left, right) => (
+            ptBrCollator.compare(left.name, right.name)
+            || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
+        );
+
+        contacts.sort(compareEntries);
+        groups.sort(compareEntries);
+
+        return { contacts, groups };
+    }
+
+    /**
+     * Extracts canonical target identity fields for a valid @c.us or @g.us model, ignoring LIDs and unsupported ids.
+     *
+     * @param {object} entry Raw WhatsApp chat or contact model.
+     * @returns {{ id: string, targetType: string, targetValue: string, phoneNumber: string|null }|null} Target fields or null.
+     */
+    parseDirectoryTarget(entry) {
+        const serializedId = typeof entry?.id?._serialized === "string"
+            ? entry.id._serialized.trim()
+            : "";
+
+        if (!serializedId || entry?.id?.server === "lid" || /@lid$/i.test(serializedId) || /@broadcast$/i.test(serializedId)) {
             return null;
         }
 
-        if (chat.isGroup || chatId.endsWith("@g.us")) {
-            return this.readGroupDirectoryEntry(chat, chatId);
+        const groupMatch = serializedId.match(DIRECTORY_GROUP_ID_PATTERN);
+        if (groupMatch) {
+            const groupId = `${groupMatch[1]}@g.us`;
+            return {
+                id: groupId,
+                targetType: GROUP_TARGET_TYPE,
+                targetValue: groupId,
+                phoneNumber: null,
+            };
         }
 
-        return await this.readContactDirectoryEntry(chat, chatId);
-    }
-
-    /**
-     * Normalizes one contact chat into a directory entry.
-     */
-    async readContactDirectoryEntry(chat, chatId) {
-        const phoneNumber = await this.readDirectoryPhoneNumber(chat, chatId);
-
-        if (!phoneNumber) {
-            return null;
+        const contactMatch = serializedId.match(DIRECTORY_CONTACT_ID_PATTERN);
+        if (contactMatch && contactMatch[1].length >= 10 && contactMatch[1].length <= 15) {
+            const digits = contactMatch[1];
+            return {
+                id: `${digits}@c.us`,
+                targetType: CONTACT_TARGET_TYPE,
+                targetValue: digits,
+                phoneNumber: digits,
+            };
         }
 
-        return {
-            targetType: CONTACT_TARGET_TYPE,
-            targetValue: phoneNumber,
-            phoneNumber,
-            chatId,
-            label: this.readDirectoryLabel(chat, phoneNumber),
-        };
+        return null;
     }
 
     /**
-     * Normalizes one group chat into a directory entry.
+     * Reads the first non-empty real display name from chat or contact model fields without falling back to phone digits.
+     *
+     * @param {object} entry Raw WhatsApp chat or contact model.
+     * @returns {string|null} Trimmed display name or null when unnamed.
      */
-    readGroupDirectoryEntry(chat, chatId) {
-        return {
-            targetType: GROUP_TARGET_TYPE,
-            targetValue: chatId,
-            phoneNumber: null,
-            chatId,
-            label: this.readDirectoryLabel(chat, chat?.name || chatId),
-        };
-    }
-
-    /**
-     * Reads the best directory label available for one chat.
-     */
-    readDirectoryLabel(chat, fallbackLabel) {
+    readDirectoryName(entry) {
         const candidate = [
-            chat?.name,
-            chat?.formattedTitle,
-            chat?.contact?.name,
-            chat?.contact?.pushname,
-            chat?.contact?.shortName,
-            fallbackLabel,
+            entry?.name,
+            entry?.formattedTitle,
+            entry?.contact?.name,
+            entry?.contact?.pushname,
+            entry?.contact?.shortName,
+            entry?.contact?.verifiedName,
+            entry?.pushname,
+            entry?.shortName,
+            entry?.verifiedName,
         ].find(value => typeof value === "string" && value.trim());
 
-        return String(candidate || fallbackLabel || "Unknown").trim();
-    }
-
-    /**
-     * Reads a normalized phone number from one contact chat.
-     */
-    async readDirectoryPhoneNumber(chat, chatId) {
-        const resolvedPhoneNumber = await this.resolveDirectoryPhoneNumber(chat, chatId);
-
-        if (resolvedPhoneNumber) {
-            return resolvedPhoneNumber;
-        }
-
-        const candidates = [
-            chat?.contact?.number,
-            chat?.contact?.id?.user,
-            chat?.id?.user,
-            typeof chatId === "string" ? chatId.replace(/@c\.us$/i, "") : null,
-        ];
-
-        for (const candidate of candidates) {
-            const digits = String(candidate ?? "").replace(/\D/g, "");
-
-            if (digits.length >= 10 && digits.length <= 15) {
-                return digits;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Resolves a canonical phone number for chats backed by WhatsApp LID identities.
-     */
-    async resolveDirectoryPhoneNumber(chat, chatId) {
-        const rawIdentifiers = [
-            chat?.contact?.id?._serialized,
-            chat?.id?._serialized,
-            chatId,
-        ].filter(value => typeof value === "string" && value.trim());
-
-        const needsResolution = rawIdentifiers.some(identifier => /@lid$/i.test(identifier))
-            || chat?.contact?.id?.server === "lid"
-            || chat?.id?.server === "lid";
-
-        if (!needsResolution || !this.client?.pupPage) {
+        if (!candidate) {
             return null;
         }
 
-        for (const identifier of rawIdentifiers) {
-            const phoneNumber = await this.resolvePhoneNumberFromWid(identifier);
+        const trimmed = candidate.trim();
 
-            if (phoneNumber) {
-                return phoneNumber;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Uses whatsapp-web.js injected helpers to convert one LID-backed wid into a phone number.
-     */
-    async resolvePhoneNumberFromWid(identifier) {
-        const phoneUser = await this.client.pupPage.evaluate(async currentIdentifier => {
-            const resolved = await window.WWebJS.enforceLidAndPnRetrieval(currentIdentifier);
-            return resolved?.phone?.user || null;
-        }, identifier);
-
-        const digits = String(phoneUser ?? "").replace(/\D/g, "");
-        return digits.length >= 10 && digits.length <= 15 ? digits : null;
+        // WhatsApp fills formattedTitle with the number when the contact has no saved name; an
+        // address is not a name, and offering it in the picker would invite a guess.
+        return /^[\d\s()+.\-]+$/.test(trimmed) ? null : trimmed;
     }
 
     /**
@@ -881,6 +913,7 @@ class WhatsAppClientManager {
      * Removes the current client reference after attempting a clean shutdown.
      */
     async disposeClient() {
+        this.chatDirectoryPrimaryOutageLogged = false;
         if (!this.client) {
             return;
         }

@@ -2,6 +2,7 @@ import express from "express";
 import { normalizeScheduledFor } from "../helpers/date.js";
 import { HttpError } from "../helpers/error.js";
 import { normalizeMessageTarget } from "../helpers/message-target.js";
+import { normalizeRecipientName, resolveRecipientTarget } from "../helpers/recipient.js";
 import { sendCreated, sendSuccess } from "../helpers/response.js";
 import { normalizeSessionId } from "../helpers/session.js";
 import { ScheduledMessage } from "../model/scheduled-message.js";
@@ -25,6 +26,52 @@ function parseScheduledMessagePayload(payload = {}, { fallbackSessionId = "main"
         message,
         scheduledFor: normalizeScheduledFor(payload.scheduledFor),
     };
+}
+
+/**
+ * Resolves an optional recipient name in the authorized session before synchronous payload normalization.
+ *
+ * @param {object} payload Request body payload.
+ * @param {{ sessionId: string, whatsappClientManager: object }} options Authorized session context.
+ * @returns {Promise<object>} Normalized scheduled-message payload without any transient recipient property.
+ */
+async function prepareScheduledMessagePayload(payload = {}, { sessionId, whatsappClientManager }) {
+    const source = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
+    const hasRecipient = Object.prototype.hasOwnProperty.call(source, "recipient");
+
+    if (!hasRecipient) {
+        return parseScheduledMessagePayload({
+            ...source,
+            sessionId,
+        }, {
+            fallbackSessionId: sessionId,
+        });
+    }
+
+    const hasExplicitPhoneNumber = source.phoneNumber !== undefined && source.phoneNumber !== null;
+    const hasExplicitTargetValue = source.targetValue !== undefined && source.targetValue !== null;
+
+    if (hasExplicitPhoneNumber || hasExplicitTargetValue) {
+        throw new HttpError(400, "recipient cannot be combined with phoneNumber or targetValue.");
+    }
+
+    if (typeof source.recipient !== "string" || !normalizeRecipientName(source.recipient)) {
+        throw new HttpError(400, "recipient must be a non-empty name string.");
+    }
+
+    const sessionState = await whatsappClientManager.getSessionState(sessionId);
+    const resolvedTarget = resolveRecipientTarget(source.recipient, sessionState?.chatDirectory, {
+        targetType: source.targetType,
+    });
+    const { recipient: _ignoredRecipient, ...restPayload } = source;
+
+    return parseScheduledMessagePayload({
+        ...restPayload,
+        ...resolvedTarget,
+        sessionId,
+    }, {
+        fallbackSessionId: sessionId,
+    });
 }
 
 /**
@@ -122,8 +169,15 @@ function createMessagesRouter({
 
     router.post("/", async (req, res, next) => {
         try {
-            const payload = parseScheduledMessagePayload(req.body);
-            await whatsappClientManager.assertAuthorizedSession(payload.sessionId, readSessionToken(req));
+            const body = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
+            // The public default for an omitted sessionId is main, not whatever the manager is
+            // configured with; legacy callers depend on it.
+            const sessionId = normalizeSessionId(body.sessionId, { fallback: "main" });
+            await whatsappClientManager.assertAuthorizedSession(sessionId, readSessionToken(req));
+            const payload = await prepareScheduledMessagePayload(body, {
+                sessionId,
+                whatsappClientManager,
+            });
             await whatsappClientManager.assertMessageTargetReachable?.(payload.sessionId, payload);
             const scheduledMessage = await scheduledMessageModel.create(payload);
             return sendCreated(res, {
@@ -144,11 +198,9 @@ function createMessagesRouter({
             await whatsappClientManager.assertAuthorizedSession(existingScheduledMessage.sessionId, readSessionToken(req));
             assertUnchangedSessionId(req.body, existingScheduledMessage);
 
-            const payload = parseScheduledMessagePayload({
-                ...req.body,
+            const payload = await prepareScheduledMessagePayload(req.body, {
                 sessionId: existingScheduledMessage.sessionId,
-            }, {
-                fallbackSessionId: existingScheduledMessage.sessionId,
+                whatsappClientManager,
             });
 
             await whatsappClientManager.assertMessageTargetReachable?.(payload.sessionId, payload);

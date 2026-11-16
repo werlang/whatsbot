@@ -309,6 +309,8 @@ test("WhatsAppClientManager reads contacts and groups from the WhatsApp chat lis
     const directory = await manager.refreshChatDirectory({ force: true });
 
     assert.deepEqual(directory.contacts, [{
+        id: "5551999999999@c.us",
+        name: "Alice",
         targetType: "contact",
         targetValue: "5551999999999",
         phoneNumber: "5551999999999",
@@ -316,6 +318,8 @@ test("WhatsAppClientManager reads contacts and groups from the WhatsApp chat lis
         label: "Alice",
     }]);
     assert.deepEqual(directory.groups, [{
+        id: "120363043210123456@g.us",
+        name: "Launch Team",
         targetType: "group",
         targetValue: "120363043210123456@g.us",
         phoneNumber: null,
@@ -325,7 +329,7 @@ test("WhatsAppClientManager reads contacts and groups from the WhatsApp chat lis
     assert.match(directory.refreshedAt, /^2026|^20/);
 });
 
-test("WhatsAppClientManager resolves LID-backed contacts to phone numbers in the chat directory", async () => {
+test("WhatsAppClientManager excludes LID-backed contacts from the chat directory without page evaluation", async () => {
     const manager = new WhatsAppClientManager({
         clientId: "main",
         authPath: "/tmp/whatsapp-auth",
@@ -333,44 +337,65 @@ test("WhatsAppClientManager resolves LID-backed contacts to phone numbers in the
         puppeteerArgs: [],
     });
 
+    let evaluateCalls = 0;
+    let chats = [{
+        id: {
+            _serialized: "64540523888721@lid",
+            user: "64540523888721",
+            server: "lid",
+        },
+        isGroup: false,
+        formattedTitle: "Alice",
+        contact: {
+            number: "64540523888721",
+            id: {
+                _serialized: "64540523888721@lid",
+                user: "64540523888721",
+                server: "lid",
+            },
+        },
+    }];
+
     manager.state.ready = true;
     manager.client = {
         async getChats() {
-            return [{
-                id: {
-                    _serialized: "64540523888721@lid",
-                    user: "64540523888721",
-                    server: "lid",
-                },
-                isGroup: false,
-                formattedTitle: "Alice",
-                contact: {
-                    number: "64540523888721",
-                    id: {
-                        _serialized: "64540523888721@lid",
-                        user: "64540523888721",
-                        server: "lid",
-                    },
-                },
-            }];
+            return chats;
         },
         pupPage: {
-            async evaluate(_fn, identifier) {
-                assert.equal(identifier, "64540523888721@lid");
+            async evaluate() {
+                evaluateCalls += 1;
                 return "5551999999999";
             },
         },
     };
 
-    const directory = await manager.refreshChatDirectory({ force: true });
+    const lidOnlyDirectory = await manager.refreshChatDirectory({ force: true });
+    assert.deepEqual(lidOnlyDirectory.contacts, []);
+    assert.equal(evaluateCalls, 0);
 
-    assert.deepEqual(directory.contacts, [{
+    chats = [
+        ...chats,
+        {
+            id: {
+                _serialized: "5551999999999@c.us",
+                user: "5551999999999",
+            },
+            isGroup: false,
+            name: "Alice Canonical",
+        },
+    ];
+
+    const mixedDirectory = await manager.refreshChatDirectory({ force: true });
+    assert.deepEqual(mixedDirectory.contacts, [{
+        id: "5551999999999@c.us",
+        name: "Alice Canonical",
         targetType: "contact",
         targetValue: "5551999999999",
         phoneNumber: "5551999999999",
-        chatId: "64540523888721@lid",
-        label: "Alice",
+        chatId: "5551999999999@c.us",
+        label: "Alice Canonical",
     }]);
+    assert.equal(evaluateCalls, 0);
 });
 
 test("WhatsAppClientManager retries Brazil mobile numbers with and without the ninth digit", async () => {
