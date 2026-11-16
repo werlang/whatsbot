@@ -99,6 +99,7 @@ export class ApiClient {
                 Accept: "application/json",
                 ...(options.headers || {}),
             },
+            signal: options.signal,
         };
 
         try {
@@ -112,6 +113,17 @@ export class ApiClient {
                 }
 
                 return normalized;
+            }
+
+            if (options.signal?.aborted || error?.name === "AbortError") {
+                return {
+                    ok: false,
+                    status: 0,
+                    data: null,
+                    message: "Request aborted.",
+                    type: "AbortError",
+                    raw: error,
+                };
             }
 
             return {

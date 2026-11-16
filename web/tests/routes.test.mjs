@@ -112,3 +112,25 @@ test("GET /session/:id keeps hostile session ids inside escaped template JSON", 
         await stopTestServer(server);
     }
 });
+
+test("entry assets carry the process fingerprint and HTML is never stored", async () => {
+    const server = await startTestServer();
+    const { port } = server.address();
+
+    try {
+        for (const route of ["/", "/login", "/session/main"]) {
+            const response = await fetch(`http://127.0.0.1:${port}${route}`);
+            const body = await response.text();
+
+            assert.equal(response.status, 200);
+            assert.equal(response.headers.get("cache-control"), "no-store");
+            assert.match(body, /\/(?:js|css)\/[\w-]+\.(?:js|css)\?v=[a-f0-9]{12}/);
+        }
+
+        const assetResponse = await fetch(`http://127.0.0.1:${port}/js/index.js`);
+        assert.equal(assetResponse.status, 200);
+        assert.equal(assetResponse.headers.get("cache-control"), "no-cache");
+    } finally {
+        await stopTestServer(server);
+    }
+});

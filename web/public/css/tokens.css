@@ -126,6 +126,7 @@
     --radius-sm: 4px;
     --radius-md: 6px;
     --radius-lg: 10px;
+    --radius-pill: 999px;
     --hairline: 1px;
 
     /* Depth: only overlays float */
@@ -145,6 +146,8 @@
     /* Layers */
     --z-sticky: 10;
     --z-topbar: 20;
+    --z-modal: 40;
+    --z-toast: 50;
 }
 
 ::selection {

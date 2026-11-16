@@ -1,0 +1,177 @@
+/* Toast notifications, adapted from node-aec to the WhatsBot token palette. */
+.toast-container {
+    position: fixed;
+    inset: auto var(--space-3) var(--space-3) var(--space-3);
+    z-index: var(--z-toast);
+    display: grid;
+    gap: var(--space-3);
+    inline-size: auto;
+    pointer-events: none;
+
+    &.toast-container--center {
+        transform: none;
+    }
+
+    @media (min-width: 640px) {
+        inset: var(--space-5) var(--space-5) auto auto;
+        inline-size: min(380px, calc(100vw - var(--space-6)));
+
+        &.toast-container--center {
+            left: 50%;
+            right: auto;
+            transform: translateX(-50%);
+        }
+    }
+}
+
+.toast {
+    --toast-accent: var(--color-ink-muted);
+    --toast-duration: 0ms;
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: var(--space-3);
+    overflow: hidden;
+    padding: var(--space-4) var(--space-4) var(--space-4) var(--space-5);
+    border: var(--hairline) solid color-mix(in oklch, var(--toast-accent) 62%, var(--color-sheet) 38%);
+    border-radius: var(--radius-lg);
+    background: linear-gradient(180deg,
+        color-mix(in oklch, var(--color-sheet) 84%, var(--toast-accent) 16%) 0%,
+        color-mix(in oklch, var(--color-sheet) 96%, var(--toast-accent) 4%) 100%);
+    color: var(--color-ink);
+    box-shadow: var(--shadow-overlay);
+    pointer-events: auto;
+    transition: opacity var(--duration-base) var(--ease-out), transform var(--duration-base) var(--ease-out);
+    animation: toast-in var(--duration-base) var(--ease-out) both;
+
+    &::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        inline-size: 5px;
+        background: color-mix(in oklch, var(--toast-accent) 68%, var(--color-ink) 32%);
+    }
+
+    &::after {
+        content: "";
+        position: absolute;
+        inset: auto 10px 0 0;
+        block-size: 3px;
+        border-radius: var(--radius-pill);
+        background: color-mix(in oklch, var(--toast-accent) 68%, var(--color-ink) 32%);
+        opacity: 0;
+        transform: scaleX(1);
+        transform-origin: left center;
+        transition: opacity var(--duration-base) var(--ease-out);
+    }
+
+    &.toast--timed::after {
+        opacity: 0.6;
+        animation: toast-timer var(--toast-duration) linear forwards;
+    }
+
+    &.toast--info {
+        --toast-accent: var(--color-ink-muted);
+    }
+
+    &.toast--success {
+        --toast-accent: var(--color-sent);
+    }
+
+    &.toast--warning {
+        --toast-accent: var(--color-time);
+    }
+
+    &.toast--error {
+        --toast-accent: var(--color-failed);
+    }
+
+    &.toast--fade {
+        opacity: 0;
+        transform: translateY(-6px);
+
+        &::after {
+            opacity: 0;
+        }
+    }
+}
+
+.toast__content {
+    display: grid;
+    gap: var(--space-2);
+    min-inline-size: 0;
+}
+
+.toast__title {
+    font-family: var(--font-board);
+    font-size: var(--text-xs);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.toast__body {
+    display: grid;
+    gap: var(--space-1);
+    line-height: var(--leading-body);
+
+    p {
+        margin: 0;
+    }
+}
+
+.toast__close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    inline-size: calc(var(--space-8) + 2px);
+    block-size: calc(var(--space-8) + 2px);
+    min-block-size: auto;
+    padding: 0;
+    border: var(--hairline) solid color-mix(in oklch, var(--toast-accent) 25%, var(--color-sheet) 75%);
+    border-radius: var(--radius-pill);
+    background: transparent;
+    color: var(--color-ink-muted);
+    cursor: pointer;
+    font-size: var(--text-lg);
+    line-height: 1;
+    transition: background-color var(--duration-base) var(--ease-out),
+        border-color var(--duration-base) var(--ease-out),
+        transform var(--duration-base) var(--ease-out);
+
+    &:hover {
+        background: color-mix(in oklch, var(--toast-accent) 18%, transparent);
+        border-color: color-mix(in oklch, var(--toast-accent) 68%, transparent);
+        color: var(--color-ink);
+        transform: translateY(-1px);
+    }
+
+    &:focus-visible {
+        outline: none;
+        border-color: var(--color-focus);
+        box-shadow: 0 0 0 4px color-mix(in oklch, var(--color-focus) 24%, transparent);
+    }
+}
+
+@keyframes toast-in {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes toast-timer {
+    from {
+        transform: scaleX(1);
+    }
+
+    to {
+        transform: scaleX(0);
+    }
+}

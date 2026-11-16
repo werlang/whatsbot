@@ -11,11 +11,11 @@ import {
 import {
     buildRecipientChoiceValue,
     formatPhoneNumberForDisplay,
-    readRecipientDirectory,
     resolveScheduledMessageTarget,
 } from "./helpers/recipient.js";
 import {
     buildScheduledMessageDraft,
+    buildScheduledMessageEditGuard,
     buildScheduledMessageViewModel,
     createScheduleFormMode,
     removeScheduledMessageFromCollection,
@@ -29,6 +29,9 @@ import {
     readSessionIdFromUrl,
     readStoredSessionAccess,
 } from "./helpers/session-id.js";
+import { ContactPicker } from "./components/contact-picker.js";
+import { Modal } from "./components/modal.js";
+import { Toast } from "./components/toast.js";
 
 const SESSION_REFRESH_INTERVAL_MS = 15000;
 const ACTIVE_PAIRING_REFRESH_INTERVAL_MS = 4000;
@@ -40,10 +43,21 @@ const CONNECTING_REFRESH_INTERVAL_MS = 2000;
 function createElements() {
     return {
         form: document.querySelector("#schedule-form"),
-        recipientEntry: document.querySelector("#recipient-entry"),
-        recipientDirectory: document.querySelector("#recipient-directory"),
         recipientPicker: document.querySelector("#recipient-picker"),
+        recipientSelection: document.querySelector("[data-role=recipient-selection]"),
+        recipientChoose: document.querySelector("[data-role=recipient-choose]"),
+        recipientClear: document.querySelector("[data-role=recipient-clear]"),
         recipientDirectoryStatus: document.querySelector("#recipient-directory-status"),
+        contactModal: document.querySelector("#contact-modal"),
+        contactModalSearch: document.querySelector("[data-role=contact-search]"),
+        contactModalResults: document.querySelector("[data-role=contact-results]"),
+        contactModalEmpty: document.querySelector("[data-role=contact-modal-empty]"),
+        contactModalStatus: document.querySelector("[data-role=contact-modal-status]"),
+        contactModalCount: document.querySelector("[data-role=contact-modal-count]"),
+        deleteModal: document.querySelector("#delete-modal"),
+        deleteModalSummary: document.querySelector("[data-role=delete-modal-summary]"),
+        deleteModalCancel: document.querySelector("[data-role=delete-modal-cancel]"),
+        deleteModalConfirm: document.querySelector("[data-role=delete-modal-confirm]"),
         phoneNumber: document.querySelector("#phone-number"),
         phoneEcho: document.querySelector("#phone-echo"),
         message: document.querySelector("#message"),
@@ -97,7 +111,6 @@ function createElements() {
         sessionReadyIndicator: document.querySelector("[data-role=session-ready-indicator]"),
         currentSession: null,
         recipientLabelByValue: new Map(),
-        recipientValueByLabel: new Map(),
         uiState: {
             isRefreshingSession: false,
             refreshTimerId: 0,
@@ -114,6 +127,10 @@ function createElements() {
             hasLoadedMessages: false,
             messagesLoadError: false,
             editingScheduledMessageId: "",
+            pendingDeleteScheduledMessageId: "",
+            isDeletingScheduledMessage: false,
+            contactPicker: null,
+            deleteModal: null,
             isRefreshingScheduledMessages: false,
             activeTab: "queue",
             lastCountdownText: "",
@@ -147,130 +164,44 @@ function readResponseMessage(response, fallbackMessage) {
 }
 
 /**
- * Renders the latest synced contacts and groups into the recipient picker.
+ * Shows one operation result through the imported Toast component. Errors stay until dismissed;
+ * successes and informational messages leave after five seconds.
+ *
+ * @param {string} message Toast body.
+ * @param {{ tone?: string }} [options] App tone ("danger" maps to the toast error tone).
+ * @returns {Toast|null} Created toast.
+ */
+function showOperationToast(message, { tone = "info" } = {}) {
+    const text = typeof message === "string" ? message.trim() : "";
+
+    if (!text) {
+        return null;
+    }
+
+    const toastTone = tone === "danger" ? "error" : tone;
+    return new Toast(text, {
+        tone: toastTone,
+        duration: toastTone === "error" ? 0 : 5000,
+    });
+}
+
+/**
+ * Synchronizes the latest synced contacts and groups into the contact picker modal.
  */
 function renderRecipientDirectory(elements, session) {
-    if (!elements.recipientPicker || !elements.recipientDirectory || !elements.recipientEntry) {
-        return;
-    }
-
     elements.currentSession = session;
-    const directory = readRecipientDirectory(session);
-    const totalRecipients = directory.contacts.length + directory.groups.length;
+    const contactPicker = elements.uiState.contactPicker;
 
-    renderRecipientAutocomplete(elements, [
-        ...directory.contacts,
-        ...directory.groups,
-    ], {
-        sessionReady: Boolean(session?.ready),
-        totalRecipients,
-    });
-
-    if (!elements.recipientDirectoryStatus) {
+    if (!contactPicker) {
         return;
     }
 
-    if (!session?.ready) {
-        elements.recipientDirectoryStatus.textContent = "Pair to load contacts. Or type a number.";
-        return;
+    contactPicker.updateDirectory(session);
+    elements.recipientLabelByValue = contactPicker.getLabelByValue();
+
+    if (elements.recipientDirectoryStatus) {
+        elements.recipientDirectoryStatus.textContent = contactPicker.getDirectoryStatusText();
     }
-
-    if (totalRecipients === 0) {
-        elements.recipientDirectoryStatus.textContent = "No contacts yet. You can still type a number.";
-        return;
-    }
-
-    const contactsLabel = formatRecipientCount(directory.contacts.length, "contact");
-    const groupsLabel = formatRecipientCount(directory.groups.length, "group");
-
-    elements.recipientDirectoryStatus.textContent = `Synced ${contactsLabel} and ${groupsLabel}. Start typing, or enter a number.`;
-}
-
-/**
- * Renders one searchable recipient directory backed by native suggestions.
- */
-function renderRecipientAutocomplete(elements, entries, { sessionReady = false, totalRecipients = 0 } = {}) {
-    if (!elements.recipientDirectory || !elements.recipientEntry || !elements.recipientPicker) {
-        return;
-    }
-
-    const previousValue = elements.recipientPicker.value;
-    const previousLabel = elements.recipientLabelByValue.get(previousValue) || String(elements.recipientEntry.value ?? "").trim();
-
-    elements.recipientDirectory.replaceChildren();
-    elements.recipientLabelByValue = new Map();
-    elements.recipientValueByLabel = new Map();
-
-    for (const entry of Array.isArray(entries) ? entries : []) {
-        const option = document.createElement("option");
-        const optionLabel = formatRecipientOptionLabel(entry);
-
-        option.value = optionLabel;
-        elements.recipientDirectory.append(option);
-        elements.recipientLabelByValue.set(buildRecipientChoiceValue(entry), optionLabel);
-        elements.recipientValueByLabel.set(optionLabel, buildRecipientChoiceValue(entry));
-    }
-
-    elements.recipientEntry.disabled = totalRecipients === 0;
-    elements.recipientEntry.placeholder = totalRecipients > 0
-        ? "Start typing"
-        : (sessionReady
-            ? "No contacts found yet"
-            : "Pair to load contacts");
-
-    if (previousValue && elements.recipientLabelByValue.has(previousValue)) {
-        elements.recipientEntry.value = elements.recipientLabelByValue.get(previousValue);
-        elements.recipientPicker.value = previousValue;
-        return;
-    }
-
-    if (previousLabel && elements.recipientValueByLabel.has(previousLabel)) {
-        elements.recipientEntry.value = previousLabel;
-        elements.recipientPicker.value = elements.recipientValueByLabel.get(previousLabel);
-        return;
-    }
-
-    if (previousValue) {
-        elements.recipientEntry.value = previousLabel;
-        elements.recipientPicker.value = previousValue;
-        return;
-    }
-
-    if (totalRecipients === 0) {
-        elements.recipientEntry.value = "";
-    }
-
-    syncRecipientSelection(elements);
-}
-
-/**
- * Formats one recipient entry for the autocomplete suggestions.
- */
-function formatRecipientOptionLabel(entry) {
-    if (entry?.phoneNumber) {
-        return `${entry.label} · ${entry.phoneNumber}`;
-    }
-
-    return `${entry?.label || "Unknown"} · Group`;
-}
-
-/**
- * Synchronizes the hidden selected recipient value with the visible entry field.
- */
-function syncRecipientSelection(elements) {
-    if (!elements.recipientEntry || !elements.recipientPicker) {
-        return;
-    }
-
-    const visibleLabel = String(elements.recipientEntry.value ?? "").trim();
-    elements.recipientPicker.value = elements.recipientValueByLabel.get(visibleLabel) || "";
-}
-
-/**
- * Formats one recipient count for concise helper copy.
- */
-function formatRecipientCount(count, label) {
-    return `${count} ${label}${count === 1 ? "" : "s"}`;
 }
 
 /**
@@ -286,7 +217,7 @@ function formatScheduledPreview(value) {
 function readPreviewRecipient(elements) {
     const selectedValue = elements.recipientPicker?.value || "";
     if (selectedValue) {
-        return elements.recipientLabelByValue.get(selectedValue) || String(elements.recipientEntry?.value ?? "").trim();
+        return elements.recipientLabelByValue.get(selectedValue) || String(elements.recipientSelection?.textContent ?? "").trim();
     }
 
     const phoneNumber = String(elements.phoneNumber?.value ?? "").trim();
@@ -415,9 +346,7 @@ function resetScheduleForm(elements, { preserveRecipient = false } = {}) {
     elements.uiState.editingScheduledMessageId = "";
 
     if (!preserveRecipient) {
-        if (elements.recipientEntry) {
-            elements.recipientEntry.value = "";
-        }
+        elements.uiState.contactPicker?.setSelectedValue("");
         if (elements.recipientPicker) {
             elements.recipientPicker.value = "";
         }
@@ -787,9 +716,9 @@ function startScheduledMessageEdit(elements, scheduledMessage) {
         elements.recipientPicker.value = draft.recipientValue;
     }
 
-    if (elements.recipientEntry) {
-        elements.recipientEntry.value = elements.recipientLabelByValue.get(draft.recipientValue) || viewModel.recipientLabel;
-    }
+    elements.uiState.contactPicker?.setSelectedValue(draft.recipientValue, {
+        fallbackLabel: viewModel.recipientLabel,
+    });
 
     if (elements.phoneNumber) {
         elements.phoneNumber.value = draft.phoneNumber;
@@ -938,6 +867,13 @@ function buildTicketElement(elements, scheduledMessage, { isNextPending = false,
     );
 
     statusCell.append(statusMark, relativeEl);
+
+    if (viewModel.sentReason) {
+        const noteEl = document.createElement("p");
+        noteEl.className = "ticket__note";
+        noteEl.textContent = viewModel.sentReason;
+        statusCell.append(noteEl);
+    }
 
     const actionsCell = document.createElement("div");
     actionsCell.className = "ticket__actions";
@@ -1112,12 +1048,11 @@ function bindInteractiveFormHelpers(elements) {
         renderFormEnhancements(elements);
     };
 
-    elements.recipientEntry?.addEventListener("input", function() {
-        syncRecipientSelection(elements);
-        rerender();
+    elements.recipientChoose?.addEventListener("click", function() {
+        elements.uiState.contactPicker?.open();
     });
-    elements.recipientEntry?.addEventListener("change", function() {
-        syncRecipientSelection(elements);
+    elements.recipientClear?.addEventListener("click", function() {
+        elements.uiState.contactPicker?.clearSelection();
         renderFormEnhancements(elements);
     });
     elements.phoneNumber?.addEventListener("input", rerender);
@@ -1172,7 +1107,7 @@ function bindInteractiveFormHelpers(elements) {
     applyWorkspaceTabLayout(elements);
 
     elements.scheduleList?.addEventListener("click", function(event) {
-        const actionButton = event.target instanceof HTMLElement
+        const actionButton = event.target instanceof Element
             ? event.target.closest("[data-action][data-scheduled-message-id]")
             : null;
 
@@ -1517,20 +1452,36 @@ async function refreshScheduledMessages(elements, sessionAccess, { announce = fa
 }
 
 /**
- * Deletes one scheduled message after confirmation.
+ * Opens the imported Modal as the delete confirmation, showing the recipient and planned time.
+ *
+ * @param {object} elements Page elements.
+ * @param {object} scheduledMessage Row selected for deletion.
+ * @returns {void}
  */
-async function deleteScheduledMessage(elements, sessionAccess, scheduledMessage) {
-    if (!scheduledMessage?.id) {
+function openDeleteScheduledMessageModal(elements, scheduledMessage) {
+    if (!scheduledMessage?.id || !elements.uiState.deleteModal) {
         return;
     }
 
     const viewModel = buildScheduledMessageViewModel(scheduledMessage, elements.recipientLabelByValue);
-    const confirmed = globalThis.confirm(`Delete the message to ${viewModel.recipientLabel} planned for ${viewModel.scheduledForLabel}?`);
+    elements.uiState.pendingDeleteScheduledMessageId = scheduledMessage.id;
 
-    if (!confirmed) {
+    if (elements.deleteModalSummary) {
+        elements.deleteModalSummary.textContent = `Message to ${viewModel.recipientLabel}, planned for ${viewModel.scheduledForLabel}.`;
+    }
+
+    elements.uiState.deleteModal.open();
+}
+
+/**
+ * Deletes one scheduled message after the explicit modal confirmation.
+ */
+async function deleteScheduledMessage(elements, sessionAccess, scheduledMessage) {
+    if (!scheduledMessage?.id || elements.uiState.isDeletingScheduledMessage) {
         return;
     }
 
+    elements.uiState.isDeletingScheduledMessage = true;
     setFeedback(elements.scheduleListFeedback, "info", "Deleting scheduled message...");
 
     try {
@@ -1546,7 +1497,8 @@ async function deleteScheduledMessage(elements, sessionAccess, scheduledMessage)
         }
 
         if (!response.ok) {
-            setFeedback(elements.scheduleListFeedback, "danger", readResponseMessage(response, "Could not delete the scheduled message."));
+            setFeedback(elements.scheduleListFeedback, "", "");
+            showOperationToast(readResponseMessage(response, "Could not delete the scheduled message."), { tone: "danger" });
             return;
         }
 
@@ -1555,15 +1507,18 @@ async function deleteScheduledMessage(elements, sessionAccess, scheduledMessage)
             resetScheduleForm(elements, { preserveRecipient: false });
         }
         renderScheduledMessages(elements);
-        setFeedback(elements.scheduleListFeedback, "success", "Scheduled message deleted.");
+        setFeedback(elements.scheduleListFeedback, "", "");
+        showOperationToast("Scheduled message deleted.", { tone: "success" });
     } catch (error) {
-        setFeedback(
-            elements.scheduleListFeedback,
-            "danger",
+        setFeedback(elements.scheduleListFeedback, "", "");
+        showOperationToast(
             error instanceof Error && error.message
                 ? error.message
                 : "Could not delete the scheduled message.",
+            { tone: "danger" },
         );
+    } finally {
+        elements.uiState.isDeletingScheduledMessage = false;
     }
 }
 
@@ -1682,6 +1637,20 @@ async function submitSchedule(event, elements, sessionAccess) {
     const editingScheduledMessageId = String(elements.uiState.editingScheduledMessageId || "").trim();
     const isEditing = Boolean(editingScheduledMessageId);
 
+    if (isEditing) {
+        const editingScheduledMessage = elements.uiState.scheduledMessages
+            .find(entry => entry.id === editingScheduledMessageId) || null;
+        const editGuard = buildScheduledMessageEditGuard(editingScheduledMessage);
+
+        if (!editGuard.allowed) {
+            // The row was delivered while its draft was open. Keep every field and never claim a
+            // save: the server would answer 409 for this exact state.
+            setFeedback(elements.formFeedback, "danger", editGuard.reason);
+            showOperationToast(editGuard.reason, { tone: "danger" });
+            return;
+        }
+    }
+
     setFeedback(elements.formFeedback, "info", isEditing ? "Saving changes..." : "Scheduling message...");
     elements.submitButton.disabled = true;
 
@@ -1710,7 +1679,9 @@ async function submitSchedule(event, elements, sessionAccess) {
         }
 
         if (!response.ok) {
-            setFeedback(elements.formFeedback, "danger", readResponseMessage(response, "Could not schedule the WhatsApp message."));
+            const rejection = readResponseMessage(response, "Could not schedule the WhatsApp message.");
+            setFeedback(elements.formFeedback, "", "");
+            showOperationToast(rejection, { tone: "danger" });
             return;
         }
 
@@ -1727,7 +1698,8 @@ async function submitSchedule(event, elements, sessionAccess) {
             successMessage += " Planned for " + formatIsoForDisplay(scheduledMessage.scheduledFor) + ".";
         }
 
-        setFeedback(elements.formFeedback, "success", successMessage);
+        setFeedback(elements.formFeedback, "", "");
+        showOperationToast(successMessage, { tone: "success" });
 
         if (scheduledMessage) {
             elements.uiState.scheduledMessages = upsertScheduledMessageInCollection(elements.uiState.scheduledMessages, scheduledMessage);
@@ -1747,12 +1719,12 @@ async function submitSchedule(event, elements, sessionAccess) {
             renderFormEnhancements(elements);
         }
     } catch (error) {
-        setFeedback(
-            elements.formFeedback,
-            "danger",
+        setFeedback(elements.formFeedback, "", "");
+        showOperationToast(
             error instanceof Error && error.message
                 ? error.message
                 : "Could not schedule the WhatsApp message.",
+            { tone: "danger" },
         );
     } finally {
         elements.submitButton.disabled = false;
@@ -1781,11 +1753,67 @@ function initSchedulerPage() {
         return;
     }
 
+    elements.uiState.contactPicker = new ContactPicker({
+        elements: {
+            modal: elements.contactModal,
+            search: elements.contactModalSearch,
+            results: elements.contactModalResults,
+            empty: elements.contactModalEmpty,
+            status: elements.contactModalStatus,
+            count: elements.contactModalCount,
+            hiddenInput: elements.recipientPicker,
+            selection: elements.recipientSelection,
+            clearButton: elements.recipientClear,
+        },
+        getSessionAccess: () => activeSessionAccess,
+        onSelect: function() {
+            // A directory selection is the canonical target; the manual phone field yields.
+            if (elements.phoneNumber) {
+                elements.phoneNumber.value = "";
+            }
+            renderFormEnhancements(elements);
+        },
+        onClear: function() {
+            renderFormEnhancements(elements);
+        },
+    }).init();
+
+    elements.uiState.deleteModal = new Modal(elements.deleteModal, {
+        onClose: function() {
+            elements.uiState.pendingDeleteScheduledMessageId = "";
+            if (elements.deleteModalConfirm) {
+                elements.deleteModalConfirm.disabled = false;
+            }
+        },
+    });
+
     hydrateFormDefaults(elements, activeSessionAccess.sessionId);
+    renderRecipientDirectory(elements, null);
     bindInteractiveFormHelpers(elements);
     renderSessionProgress(elements);
     void refreshSessionState(elements, activeSessionAccess);
     void refreshScheduledMessages(elements, activeSessionAccess);
+
+    elements.deleteModalCancel?.addEventListener("click", function() {
+        elements.uiState.deleteModal?.close();
+    });
+
+    elements.deleteModalConfirm?.addEventListener("click", function() {
+        const scheduledMessageId = elements.uiState.pendingDeleteScheduledMessageId;
+        const scheduledMessage = elements.uiState.scheduledMessages
+            .find(entry => entry.id === scheduledMessageId) || null;
+
+        elements.uiState.pendingDeleteScheduledMessageId = "";
+        if (!scheduledMessage || elements.uiState.isDeletingScheduledMessage) {
+            return;
+        }
+
+        if (elements.deleteModalConfirm) {
+            elements.deleteModalConfirm.disabled = true;
+        }
+        elements.uiState.deleteModal?.close();
+        void deleteScheduledMessage(elements, activeSessionAccess, scheduledMessage);
+    });
 
     elements.sessionCheckNow?.addEventListener("click", function() {
         setFeedback(elements.formFeedback, "info", "Checking session status now...");
@@ -1797,7 +1825,7 @@ function initSchedulerPage() {
     });
 
     elements.scheduleList?.addEventListener("click", function(event) {
-        const actionButton = event.target instanceof HTMLElement
+        const actionButton = event.target instanceof Element
             ? event.target.closest("[data-action=delete][data-scheduled-message-id]")
             : null;
 
@@ -1809,7 +1837,7 @@ function initSchedulerPage() {
             .find(entry => entry.id === actionButton.dataset.scheduledMessageId) || null;
 
         if (scheduledMessage) {
-            void deleteScheduledMessage(elements, activeSessionAccess, scheduledMessage);
+            openDeleteScheduledMessageModal(elements, scheduledMessage);
         }
     });
 

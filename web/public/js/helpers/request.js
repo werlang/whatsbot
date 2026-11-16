@@ -34,6 +34,19 @@ export class Request {
      */
     async #request(url, options = {}) {
         const controller = new AbortController();
+        const externalSignal = options.signal;
+        const abortFromCaller = function() {
+            controller.abort();
+        };
+
+        if (externalSignal) {
+            if (externalSignal.aborted) {
+                controller.abort();
+            } else {
+                externalSignal.addEventListener("abort", abortFromCaller, { once: true });
+            }
+        }
+
         const timeoutId = setTimeout(function() {
             controller.abort();
         }, this.#timeout);
@@ -41,11 +54,11 @@ export class Request {
         try {
             const response = await fetch(this.#baseURL + url, {
                 ...options,
+                signal: controller.signal,
                 headers: {
                     ...this.#defaultHeaders,
                     ...options.headers,
                 },
-                signal: controller.signal,
             });
 
             const contentType = response.headers.get("content-type") || "";
@@ -72,12 +85,19 @@ export class Request {
             return await parseBody();
         } catch (error) {
             if (error.name === "AbortError") {
+                if (externalSignal?.aborted) {
+                    const abortError = new Error("Request aborted");
+                    abortError.name = "AbortError";
+                    throw abortError;
+                }
+
                 throw new Error("Request timeout");
             }
 
             throw error;
         } finally {
             clearTimeout(timeoutId);
+            externalSignal?.removeEventListener("abort", abortFromCaller);
         }
     }
 

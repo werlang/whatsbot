@@ -11,8 +11,11 @@
 @import url("./board.css") layer(components);
 @import url("./pane.css") layer(components);
 @import url("./compose.css") layer(components);
+@import url("./contact-picker.css") layer(components);
 @import url("./queue.css") layer(components);
 @import url("./session-panel.css") layer(components);
+@import url("./components/modal.css") layer(components);
+@import url("./components/toast.css") layer(components);
 
 /*
  * Phone and tablet: one column, document scroll, board sticky, tabs switch panes.

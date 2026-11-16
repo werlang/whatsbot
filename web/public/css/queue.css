@@ -194,6 +194,14 @@
     color: var(--color-failed);
 }
 
+.ticket__note {
+    flex-basis: 100%;
+    font-size: var(--text-xs);
+    line-height: var(--leading-snug);
+    color: var(--color-ink-muted);
+    text-align: end;
+}
+
 .ticket__status {
     grid-area: status;
     display: flex;

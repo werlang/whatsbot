@@ -87,7 +87,17 @@ function createApp() {
         });
     });
 
-    application.use(express.static(publicPath));
+    application.use(express.static(publicPath, {
+        cacheControl: false,
+        setHeaders: (res, filePath) => {
+            // The `?v=` fingerprint in the templates makes unchanged URLs invalid after a deploy;
+            // never let a browser silently serve a previous process's JavaScript or CSS.
+            res.setHeader(
+                "Cache-Control",
+                String(filePath).toLowerCase().endsWith(".html") ? "no-store" : "no-cache",
+            );
+        },
+    }));
 
     /**
      * Handles all other routes with a 404 response

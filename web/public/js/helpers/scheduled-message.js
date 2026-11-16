@@ -3,6 +3,7 @@ import { buildRecipientChoiceValue } from "./recipient.js";
 
 const EDITABLE_STATUSES = new Set(["pending", "failed"]);
 const DELETABLE_STATUSES = new Set(["pending", "failed"]);
+const SENT_EDIT_REASON = "Sent — cannot edit a delivered message.";
 
 /**
  * Normalizes one scheduled-message status label.
@@ -92,8 +93,40 @@ function buildScheduledMessageViewModel(scheduledMessage = {}, recipientLabelByV
         statusTone: toneByStatus[normalizedStatus] || "info",
         canEdit: isScheduledMessageEditable(scheduledMessage),
         canDelete: isScheduledMessageDeletable(scheduledMessage),
+        sentReason: normalizedStatus === "sent" ? SENT_EDIT_REASON : "",
     };
 }
+
+/**
+ * Returns whether the current edit draft may be submitted.
+ *
+ * A row that became `sent` while the user was editing must not pretend the change was saved: the
+ * caller keeps the draft and shows this reason instead of resetting the form.
+ *
+ * @param {object|null} scheduledMessage The row currently loaded into the form.
+ * @returns {{ allowed: boolean, reason: string }} Submission decision.
+ */
+function buildScheduledMessageEditGuard(scheduledMessage = null) {
+    if (!scheduledMessage?.id) {
+        return {
+            allowed: true,
+            reason: "",
+        };
+    }
+
+    if (normalizeScheduledMessageStatus(scheduledMessage.status) === "sent") {
+        return {
+            allowed: false,
+            reason: SENT_EDIT_REASON,
+        };
+    }
+
+    return {
+        allowed: true,
+        reason: "",
+    };
+}
+
 
 /**
  * Builds the current form mode labels from one optional editing schedule.
@@ -158,6 +191,7 @@ function removeScheduledMessageFromCollection(messages = [], scheduledMessageId 
 
 export {
     buildScheduledMessageDraft,
+    buildScheduledMessageEditGuard,
     buildScheduledMessageViewModel,
     createScheduleFormMode,
     isScheduledMessageDeletable,

@@ -12,8 +12,8 @@
     <link rel="icon" href="/img/mark.svg" type="image/svg+xml">
     <link rel="preload" href="/fonts/martian-mono-var.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="preload" href="/fonts/source-sans-3-var.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="stylesheet" href="/css/workspace.css">
-    <script type="module" src="/js/index.js"></script>
+    <link rel="stylesheet" href="/css/workspace.css?v={{assetVersion}}">
+    <script type="module" src="/js/index.js?v={{assetVersion}}"></script>
 </head>
 
 <body class="workspace">
@@ -98,13 +98,18 @@
                         </div>
 
                         <div class="field">
-                            <label class="field__label" for="recipient-entry">
+                            <span class="field__label">
                                 <span>Or a saved contact or group</span>
-                            </label>
-                            <input class="field__control" id="recipient-entry" name="recipientEntry" type="search" autocomplete="off" list="recipient-directory" placeholder="Search contacts" aria-describedby="recipient-directory-status">
-                            <datalist id="recipient-directory"></datalist>
+                            </span>
                             <input id="recipient-picker" name="recipient" type="hidden" value="">
-                            <p class="field__hint" id="recipient-directory-status">Contacts appear once WhatsApp shares them.</p>
+                            <div class="recipient-picker">
+                                <p class="recipient-picker__value" data-role="recipient-selection" aria-live="polite">No contact selected</p>
+                                <div class="recipient-picker__actions">
+                                    <button class="button button--sm" data-role="recipient-choose" type="button" aria-haspopup="dialog" aria-controls="contact-modal">Choose contact or group</button>
+                                    <button class="button button--quiet button--sm" data-role="recipient-clear" type="button" hidden>Clear</button>
+                                </div>
+                            </div>
+                            <p class="field__hint" id="recipient-directory-status" data-role="recipient-directory-status">Contacts appear once WhatsApp shares them.</p>
                         </div>
                     </fieldset>
 
@@ -246,6 +251,51 @@
             </footer>
         </section>
     </main>
+
+    <div class="modal" id="contact-modal" data-role="contact-modal" hidden>
+        <div class="modal-overlay" data-role="contact-modal-overlay"></div>
+        <div class="modal-dialog modal-dialog--contact" role="dialog" aria-modal="true" aria-labelledby="contact-modal-title" aria-describedby="contact-modal-status">
+            <header class="modal-header">
+                <p class="modal-kicker">To</p>
+                <h2 class="modal-title" id="contact-modal-title">Choose contact or group</h2>
+                <p class="modal-subtitle" id="contact-modal-status" data-role="contact-modal-status">Contacts are syncing</p>
+                <button class="modal-close" type="button" data-role="contact-modal-close" aria-label="Close contact picker">
+                    <svg class="icon" aria-hidden="true"><use href="/img/icons.svg#i-close"></use></svg>
+                </button>
+            </header>
+
+            <div class="modal-body">
+                <div class="field">
+                    <label class="field__label" for="contact-search">Search contacts</label>
+                    <input class="field__control" id="contact-search" data-role="contact-search" data-modal-autofocus type="search" autocomplete="off" placeholder="Name or number" aria-controls="contact-results">
+                </div>
+
+                <p class="contact-picker__meta board-type" data-role="contact-modal-count" aria-live="polite" hidden></p>
+                <div class="contact-picker__results" id="contact-results" data-role="contact-results" role="listbox" aria-label="Contacts and groups"></div>
+                <p class="contact-picker__empty" data-role="contact-modal-empty" hidden></p>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="delete-modal" data-role="delete-modal" hidden>
+        <div class="modal-overlay" data-role="delete-modal-overlay"></div>
+        <div class="modal-dialog modal-dialog--confirm" role="dialog" aria-modal="true" aria-labelledby="delete-modal-title" aria-describedby="delete-modal-summary">
+            <header class="modal-header modal-header--danger">
+                <p class="modal-kicker">Delete</p>
+                <h2 class="modal-title" id="delete-modal-title">Delete scheduled message?</h2>
+            </header>
+
+            <div class="modal-body">
+                <p class="modal-warning">This cannot be undone.</p>
+                <p id="delete-modal-summary" data-role="delete-modal-summary"></p>
+            </div>
+
+            <footer class="modal-footer">
+                <button class="button button--quiet" type="button" data-role="delete-modal-cancel" data-modal-autofocus>Cancel</button>
+                <button class="button button--danger" type="button" data-role="delete-modal-confirm">Delete</button>
+            </footer>
+        </div>
+    </div>
 
     {{{template-vars}}}
 </body>
