@@ -781,3 +781,28 @@ test("a replacement client does not inherit a pending directory refresh", async 
     assert.deepEqual(staleResult.contacts.map(entry => entry.name), ["Replacement"], "the stale operation must not overwrite the replacement");
     assert.deepEqual(manager.state.chatDirectory.contacts.map(entry => entry.name), ["Replacement"]);
 });
+
+test("directory shows the complete name when the saved label is a prefix of it", async () => {
+    const entries = [
+        { id: { _serialized: "555195171104@c.us" }, name: "Vinicius", contact: { pushname: "Vinícius Guimarães" } },
+        { id: { _serialized: "555197771055@c.us" }, name: "Pablo Werlang", contact: { pushname: "" } },
+    ];
+
+    const manager = createReadyManager({ async getChats() { return entries; } });
+    const directory = await manager.refreshChatDirectory({ force: true });
+    const names = new Map(directory.contacts.map(entry => [entry.id, entry.name]));
+
+    assert.equal(names.get("555195171104@c.us"), "Vinícius Guimarães");
+    assert.equal(names.get("555197771055@c.us"), "Pablo Werlang");
+});
+
+test("directory keeps a deliberate rename instead of the reported name", async () => {
+    const entries = [
+        { id: { _serialized: "5551911111111@c.us" }, name: "Mãe", contact: { pushname: "Maria Silva" } },
+    ];
+
+    const manager = createReadyManager({ async getChats() { return entries; } });
+    const directory = await manager.refreshChatDirectory({ force: true });
+
+    assert.equal(directory.contacts[0].name, "Mãe");
+});

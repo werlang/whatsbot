@@ -25,6 +25,13 @@ const ptBrCollator = new Intl.Collator("pt-BR");
  * Manages the single whatsapp-web.js client used by the API runtime.
  */
 /**
+ * Folds one directory label for prefix comparison, ignoring case and diacritics.
+ */
+function foldDirectoryLabel(value) {
+    return String(value ?? "").normalize("NFD").replace(/\p{Mn}/gu, "").toLowerCase();
+}
+
+/**
  * Reports whether one directory label is really an address (bare digits, a formatted phone number
  * or a serialized chat id) instead of a name a person would recognise.
  */
@@ -883,6 +890,8 @@ class WhatsAppClientManager {
             entry?.verifiedName,
         ];
 
+        const usable = [];
+
         // WhatsApp fills formattedTitle with the number when the contact has no saved name; an
         // address is not a name. Skip such labels and keep looking for a real name further down
         // the list instead of discarding the entry wholesale.
@@ -892,7 +901,7 @@ class WhatsAppClientManager {
             }
 
             const trimmed = value.trim();
-            if (!trimmed) {
+            if (!trimmed || usable.includes(trimmed)) {
                 continue;
             }
 
@@ -901,10 +910,28 @@ class WhatsAppClientManager {
                 continue;
             }
 
-            return trimmed;
+            usable.push(trimmed);
         }
 
-        return null;
+        if (usable.length === 0) {
+            return null;
+        }
+
+        // The saved label is the default, but a contact saved under a short form ("Vinicius")
+        // should read as the complete name WhatsApp reports ("Vinícius Guimarães") when one is a
+        // prefix of the other. A deliberate rename ("Mãe") is never overridden.
+        const saved = usable[0];
+        const foldedSaved = foldDirectoryLabel(saved);
+        let displayName = saved;
+
+        for (const candidate of usable.slice(1)) {
+            const foldedCandidate = foldDirectoryLabel(candidate);
+            if (foldedCandidate.startsWith(`${foldedSaved} `) && candidate.length > displayName.length) {
+                displayName = candidate;
+            }
+        }
+
+        return displayName;
     }
 
     /**
