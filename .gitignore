@@ -1,8 +1,10 @@
 .DS_Store
 .env
+.env.test
 node_modules
 api/node_modules
 web/node_modules
 **/coverage
 .agents
 .wwebjs_cache
+.pairing
