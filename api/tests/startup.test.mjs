@@ -52,7 +52,7 @@ test("start listens before the WhatsApp client finishes initializing", async () 
 
 test("start keeps the API up when the WhatsApp client boot fails", async () => {
     const doubles = createRuntimeDoubles({
-        initialize: async () => { throw new Error('Runtime.callFunctionOn timed out.'); },
+        initialize: async () => { throw new Error('Connection Closed'); },
     });
     const server = await start({ ...doubles, listenPort: 0 });
 

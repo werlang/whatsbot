@@ -1,14 +1,4 @@
 /**
- * Normalizes a comma-separated environment variable into a list of trimmed values.
- */
-function readList(value = '') {
-    return String(value)
-        .split(',')
-        .map(item => item.trim())
-        .filter(Boolean);
-}
-
-/**
  * Reads one integer environment variable with a fallback value.
  */
 function readInteger(value, fallback) {
@@ -47,12 +37,10 @@ function createAppConfig(env = process.env) {
         whatsapp: {
             clientId: 'main',
             authPath: '/whatsapp/auth',
-            puppeteerArgs: readList('--no-sandbox,--disable-setuid-sandbox'),
-            executablePath: '/usr/bin/chromium-browser',
-            protocolTimeout: readInteger(env.WHATSAPP_PROTOCOL_TIMEOUT_MS, 5 * 60 * 1000),
             reconnectMaxAttempts: Math.max(0, readInteger(env.WHATSAPP_RECONNECT_MAX_ATTEMPTS, 5)),
             reconnectDelayMs: Math.max(1, readInteger(env.WHATSAPP_RECONNECT_DELAY_MS, 1000)),
             reconnectMaxDelayMs: Math.max(1, readInteger(env.WHATSAPP_RECONNECT_MAX_DELAY_MS, 30000)),
+            reconnectSlowRetryMs: Math.max(1, readInteger(env.WHATSAPP_RECONNECT_SLOW_RETRY_MS, 300000)),
             chatDirectoryRetryMs: Math.max(1, readInteger(env.WHATSAPP_CHAT_DIRECTORY_RETRY_MS, 30000)),
         },
     };
@@ -60,4 +48,4 @@ function createAppConfig(env = process.env) {
 
 const appConfig = createAppConfig();
 
-export { appConfig, createAppConfig, readInteger, readList, readPort };
+export { appConfig, createAppConfig, readInteger, readPort };

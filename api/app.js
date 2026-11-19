@@ -65,7 +65,6 @@ function createApp({
                     readySessionIds,
                     authPath: appConfig.whatsapp.authPath,
                     clientId: whatsappClient.getDefaultSessionId?.() || appConfig.whatsapp.clientId,
-                    puppeteerArgs: appConfig.whatsapp.puppeteerArgs,
                     activeSessionCount: whatsappClient.getActiveSessionCount?.() || 0,
                     sessionStatus: whatsappClient.getKnownSessionState?.().status || "idle",
                 },
@@ -95,9 +94,9 @@ async function start({
     listenPort = port,
 } = {}) {
     // The HTTP API must become reachable before its dependencies are healthy. The WhatsApp
-    // browser boot can take minutes and can fail outright (a corrupted Chromium profile makes
-    // the injected bundle time out), and a database outage must not take the whole endpoint
-    // down: readiness reports both cases while the server keeps answering.
+    // socket boot needs a paired-auth read and a WebSocket handshake that can fail outright,
+    // and a database outage must not take the whole endpoint down: readiness reports both cases
+    // while the server keeps answering.
     await mysqlDriver.waitForReady().catch(error => {
         console.error('Database is not ready at startup; /ready reports it:', error?.message || error);
     });

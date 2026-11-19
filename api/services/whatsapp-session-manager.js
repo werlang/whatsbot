@@ -10,7 +10,7 @@ import { WhatsAppSessionAccessStore } from "./whatsapp-session-access-store.js";
 import { WhatsAppClientManager } from "./whatsapp-client-manager.js";
 
 /**
- * Manages multiple WhatsApp Web sessions for the API runtime.
+ * Manages multiple Baileys WhatsApp sessions for the API runtime.
  */
 class WhatsAppSessionManager {
     /**
@@ -40,7 +40,7 @@ class WhatsAppSessionManager {
     }
 
     /**
-     * Serializes browser boots, including retries, so startup recovery cannot saturate the host.
+     * Serializes socket boots, including retries, so startup recovery cannot saturate the host.
      */
     runClientBoot(operation) {
         const boot = this.clientBootPromise.then(operation);
@@ -49,7 +49,7 @@ class WhatsAppSessionManager {
     }
 
     /**
-     * Initializes the registry, then restores persisted profiles sequentially in the background.
+     * Initializes the registry, then restores persisted sessions sequentially in the background.
      */
     async initialize() {
         await this.sessionAccessStore.initialize();
@@ -62,7 +62,7 @@ class WhatsAppSessionManager {
     }
 
     /**
-     * Restores known profiles without letting one failed Chromium boot stop the others.
+     * Restores known sessions without letting one failed socket boot stop the others.
      */
     async restoreSessions() {
         const sessionIds = [...new Set([
@@ -81,22 +81,16 @@ class WhatsAppSessionManager {
     }
 
     /**
-     * Checks for WhatsApp IndexedDB data; an empty Chromium profile cannot restore pairing.
-     * Existing storage is only a restoration candidate, not proof that credentials are valid.
+     * Checks for Baileys credentials; a creds file without a paired account cannot restore pairing.
+     * Existing credentials are only a restoration candidate, not proof that they are still valid.
      */
     async hasAuthProfile(sessionId) {
-        const storagePath = path.join(this.config.authPath, `session-${normalizeSessionId(sessionId)}`,
-            "Default", "IndexedDB");
+        const credsPath = path.join(this.config.authPath, "baileys", normalizeSessionId(sessionId), "creds.json");
         try {
-            const entries = await fs.readdir(storagePath, { withFileTypes: true });
-            for (const entry of entries) {
-                if (entry.isDirectory() && entry.name.startsWith("https_web.whatsapp.com_")
-                    && (await fs.readdir(path.join(storagePath, entry.name))).length > 0) return true;
-            }
+            const creds = JSON.parse(await fs.readFile(credsPath, "utf8"));
+            return Boolean(creds?.registered || creds?.me);
+        } catch {
             return false;
-        } catch (error) {
-            if (error?.code === "ENOENT") return false;
-            throw error;
         }
     }
 
@@ -108,7 +102,7 @@ class WhatsAppSessionManager {
     }
 
     /**
-     * Creates one brand-new session with its own LocalAuth profile.
+     * Creates one brand-new session with its own Baileys auth directory.
      */
     async createSession() {
         const sessionId = normalizeSessionId(crypto.randomUUID());
@@ -167,13 +161,13 @@ class WhatsAppSessionManager {
         const normalizedSessionId = normalizeSessionId(sessionId);
         const initialization = this.ensureSession(normalizedSessionId);
         const session = this.sessions.get(normalizedSessionId) || await initialization;
-        // State reads must expose progress while Chromium boots, including a pending retry.
+        // State reads must expose progress while the socket boots, including a pending retry.
         // The retained client manager records boot failures and owns subsequent recovery.
         initialization.catch(() => {});
 
         if (session.isReady()) {
-            // Reading the contact directory is enrichment, not a prerequisite for sending: when
-            // WhatsApp Web refuses getChats, every route that reports session state must keep
+            // Reading the contact directory is enrichment, not a prerequisite for sending: a
+            // group-metadata read can fail while every route that reports session state must keep
             // answering instead of failing with an opaque error.
             await session.refreshChatDirectory().catch(error => {
                 this.logger.error(`Could not refresh the chat directory for session ${normalizedSessionId}:`, error?.message || error);
@@ -181,6 +175,35 @@ class WhatsAppSessionManager {
         }
 
         return this.describeSession(normalizedSessionId, session);
+    }
+
+    /**
+     * Reports whether one active session is ready to send, without cloning session state.
+     *
+     * @param {string} sessionId Session identifier.
+     * @returns {boolean} True when the session is active and ready.
+     */
+    isSessionReady(sessionId) {
+        const normalizedSessionId = normalizeSessionId(sessionId);
+        const session = this.sessions.get(normalizedSessionId);
+
+        return Boolean(session?.isReady?.());
+    }
+
+    /**
+     * Reports whether one normalized target is addressable from the active session's directory.
+     *
+     * The lookup is a Set membership check, so the avatar route never clones the whole directory.
+     *
+     * @param {string} sessionId Session identifier.
+     * @param {{ targetType?: string, targetValue?: string, phoneNumber?: string }} target Canonical target.
+     * @returns {boolean} True when the active session knows the target.
+     */
+    hasDirectoryTarget(sessionId, target) {
+        const normalizedSessionId = normalizeSessionId(sessionId);
+        const session = this.sessions.get(normalizedSessionId);
+
+        return Boolean(session?.hasChatDirectoryTarget?.(target));
     }
 
     /**

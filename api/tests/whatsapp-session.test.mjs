@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { createApp } from "../app.js";
 import { parseWhatsBotCommand } from "../services/whatsapp-command.js";
@@ -88,172 +91,64 @@ test("GET /whatsapp/session returns the stable session envelope", async () => {
     }
 });
 
-test("WhatsAppClientManager clears stale Chromium singleton artifacts before booting", async () => {
-    const removedArtifacts = [];
-    const manager = new WhatsAppClientManager({
-        clientId: "main",
-        authPath: "/tmp/whatsapp-auth",
-        executablePath: "/usr/bin/chromium-browser",
-        puppeteerArgs: [],
+/**
+ * Creates one manager with a temp auth directory and no real socket.
+ *
+ * @param {object} t Test context.
+ * @param {object} [options] Manager options.
+ * @returns {Promise<object>} Client manager.
+ */
+async function createManager(t, options = {}) {
+    const authPath = await fs.mkdtemp(path.join(os.tmpdir(), "whatsbot-session-"));
+    t.after(() => fs.rm(authPath, { recursive: true, force: true }));
+    const manager = new WhatsAppClientManager({ clientId: "alpha", authPath }, {
+        logger: { error() {}, warn() {} },
+        ...options,
     });
+    t.after(() => manager.destroy());
+    return manager;
+}
 
-    manager.clearChromiumSingletonArtifacts = async function () {
-        removedArtifacts.push("cleared");
-    };
-    manager.registerLifecycleHandlers = function () {};
-    manager.client = {
-        initialize: async () => {},
-    };
-
-    let initializeCalls = 0;
-    manager.bootClient = async function () {
-        initializeCalls += 1;
-        await this.clearChromiumSingletonArtifacts();
-        this.client = {
-            initialize: async () => {},
-        };
-        return this.client;
-    };
-
-    await manager.initializeClient();
-
-    assert.equal(initializeCalls, 1);
-    assert.deepEqual(removedArtifacts, ["cleared"]);
-});
-
-test("WhatsAppClientManager retries once after a Chromium profile lock error", async () => {
-    const manager = new WhatsAppClientManager({
-        clientId: "main",
-        authPath: "/tmp/whatsapp-auth",
-        executablePath: "/usr/bin/chromium-browser",
-        puppeteerArgs: [],
-    });
-
-    let attempts = 0;
-    let clearCalls = 0;
-    let disposeCalls = 0;
-
-    manager.clearChromiumSingletonArtifacts = async function () {
-        clearCalls += 1;
-    };
-    manager.disposeClient = async function () {
-        disposeCalls += 1;
-    };
-    manager.bootClient = async function () {
-        attempts += 1;
-
-        if (attempts === 1) {
-            throw new Error("The profile appears to be in use by another Chromium process.");
-        }
-
-        return { ready: true };
-    };
-
-    const client = await manager.initializeClient();
-
-    assert.deepEqual(client, { ready: true });
-    assert.equal(attempts, 2);
-    assert.equal(disposeCalls, 1);
-    assert.equal(clearCalls, 1);
-});
-
-test("WhatsAppClientManager resolves a registered chat id before sending", async () => {
-    const manager = new WhatsAppClientManager({
-        clientId: "main",
-        authPath: "/tmp/whatsapp-auth",
-        executablePath: "/usr/bin/chromium-browser",
-        puppeteerArgs: [],
-    });
-
+test("WhatsAppClientManager resolves a registered chat id before sending", async t => {
+    const manager = await createManager(t);
     manager.state.ready = true;
+
     const lookedUp = [];
-    let sentPayload = null;
     manager.client = {
-        async getNumberId(chatId) {
-            lookedUp.push(chatId);
-            return chatId === "5551999999999@c.us"
-                ? { _serialized: chatId }
-                : null;
+        async onWhatsApp(candidate) {
+            lookedUp.push(candidate);
+            return candidate === "5551999999999"
+                ? [{ jid: "5551999999999@s.whatsapp.net", exists: true }]
+                : [];
         },
-        async sendMessage(chatId, message) {
-            sentPayload = { chatId, message };
+        async sendMessage(jid, content) {
+            assert.deepEqual({ jid, content }, { jid: "5551999999999@s.whatsapp.net", content: { text: "hello world" } });
             return {
-                id: { _serialized: "wamid-1" },
-                timestamp: 1776254400,
+                key: { id: "wamid-1" },
+                messageTimestamp: 1776254400,
             };
         },
     };
 
     const result = await manager.sendMessage("5551999999999", "hello world");
 
-    assert.deepEqual(lookedUp, ["5551999999999@c.us"]);
-    assert.deepEqual(sentPayload, {
-        chatId: "5551999999999@c.us",
-        message: "hello world",
-    });
+    assert.deepEqual(lookedUp, ["5551999999999"]);
     assert.equal(result.chatId, "5551999999999@c.us");
     assert.equal(result.whatsappMessageId, "wamid-1");
+    assert.equal(result.sentAt, new Date(1776254400 * 1000).toISOString());
 });
 
-test("WhatsAppClientManager retries send after syncing a missing LID contact", async () => {
-    const manager = new WhatsAppClientManager({
-        clientId: "main",
-        authPath: "/tmp/whatsapp-auth",
-        executablePath: "/usr/bin/chromium-browser",
-        puppeteerArgs: [],
-    });
-
+test("WhatsAppClientManager sends group messages directly to the provided group chat id", async t => {
+    const manager = await createManager(t);
     manager.state.ready = true;
-    manager.resolveWhatsAppChatId = async function () {
-        return "5551997771055@c.us";
-    };
 
-    const sentAttempts = [];
-    manager.syncChatForMissingLid = async function (chatId) {
-        assert.equal(chatId, "5551997771055@c.us");
-        return "551197771055@lid";
-    };
-    manager.client = {
-        async sendMessage(chatId, message) {
-            sentAttempts.push({ chatId, message });
-
-            if (sentAttempts.length === 1) {
-                throw new Error("No LID for user");
-            }
-
-            return {
-                id: { _serialized: "wamid-2" },
-                timestamp: 1776254400,
-            };
-        },
-    };
-
-    const result = await manager.sendMessage("5551997771055", "hello world");
-
-    assert.deepEqual(sentAttempts, [
-        { chatId: "5551997771055@c.us", message: "hello world" },
-        { chatId: "551197771055@lid", message: "hello world" },
-    ]);
-    assert.equal(result.chatId, "551197771055@lid");
-    assert.equal(result.whatsappMessageId, "wamid-2");
-});
-
-test("WhatsAppClientManager sends group messages directly to the provided group chat id", async () => {
-    const manager = new WhatsAppClientManager({
-        clientId: "main",
-        authPath: "/tmp/whatsapp-auth",
-        executablePath: "/usr/bin/chromium-browser",
-        puppeteerArgs: [],
-    });
-
-    manager.state.ready = true;
     let sentPayload = null;
     manager.client = {
-        async sendMessage(chatId, message) {
-            sentPayload = { chatId, message };
+        async sendMessage(jid, content) {
+            sentPayload = { jid, content };
             return {
-                id: { _serialized: "wamid-group-1" },
-                timestamp: 1776254400,
+                key: { id: "wamid-group-1" },
+                messageTimestamp: 1776254400,
             };
         },
     };
@@ -264,178 +159,40 @@ test("WhatsAppClientManager sends group messages directly to the provided group 
     }, "hello group");
 
     assert.deepEqual(sentPayload, {
-        chatId: "120363043210123456@g.us",
-        message: "hello group",
+        jid: "120363043210123456@g.us",
+        content: { text: "hello group" },
     });
     assert.equal(result.chatId, "120363043210123456@g.us");
     assert.equal(result.phoneNumber, null);
     assert.equal(result.targetType, "group");
 });
 
-test("WhatsAppClientManager reads contacts and groups from the WhatsApp chat list", async () => {
-    const manager = new WhatsAppClientManager({
-        clientId: "main",
-        authPath: "/tmp/whatsapp-auth",
-        executablePath: "/usr/bin/chromium-browser",
-        puppeteerArgs: [],
-    });
-
-    manager.state.ready = true;
-    manager.client = {
-        async getChats() {
-            return [
-                {
-                    id: {
-                        _serialized: "5551999999999@c.us",
-                        user: "5551999999999",
-                    },
-                    isGroup: false,
-                    name: "Alice",
-                    contact: {
-                        number: "5551999999999",
-                    },
-                },
-                {
-                    id: {
-                        _serialized: "120363043210123456@g.us",
-                    },
-                    isGroup: true,
-                    name: "Launch Team",
-                },
-            ];
-        },
-    };
-
-    const directory = await manager.refreshChatDirectory({ force: true });
-
-    assert.deepEqual(directory.contacts, [{
-        id: "5551999999999@c.us",
-        name: "Alice",
-        targetType: "contact",
-        targetValue: "5551999999999",
-        phoneNumber: "5551999999999",
-        chatId: "5551999999999@c.us",
-        label: "Alice",
-    }]);
-    assert.deepEqual(directory.groups, [{
-        id: "120363043210123456@g.us",
-        name: "Launch Team",
-        targetType: "group",
-        targetValue: "120363043210123456@g.us",
-        phoneNumber: null,
-        chatId: "120363043210123456@g.us",
-        label: "Launch Team",
-    }]);
-    assert.match(directory.refreshedAt, /^2026|^20/);
-});
-
-test("WhatsAppClientManager excludes LID-backed contacts from the chat directory without page evaluation", async () => {
-    const manager = new WhatsAppClientManager({
-        clientId: "main",
-        authPath: "/tmp/whatsapp-auth",
-        executablePath: "/usr/bin/chromium-browser",
-        puppeteerArgs: [],
-    });
-
-    let evaluateCalls = 0;
-    let chats = [{
-        id: {
-            _serialized: "64540523888721@lid",
-            user: "64540523888721",
-            server: "lid",
-        },
-        isGroup: false,
-        formattedTitle: "Alice",
-        contact: {
-            number: "64540523888721",
-            id: {
-                _serialized: "64540523888721@lid",
-                user: "64540523888721",
-                server: "lid",
-            },
-        },
-    }];
-
-    manager.state.ready = true;
-    manager.client = {
-        async getChats() {
-            return chats;
-        },
-        pupPage: {
-            async evaluate() {
-                evaluateCalls += 1;
-                return "5551999999999";
-            },
-        },
-    };
-
-    const lidOnlyDirectory = await manager.refreshChatDirectory({ force: true });
-    assert.deepEqual(lidOnlyDirectory.contacts, []);
-    assert.equal(evaluateCalls, 0);
-
-    chats = [
-        ...chats,
-        {
-            id: {
-                _serialized: "5551999999999@c.us",
-                user: "5551999999999",
-            },
-            isGroup: false,
-            name: "Alice Canonical",
-        },
-    ];
-
-    const mixedDirectory = await manager.refreshChatDirectory({ force: true });
-    assert.deepEqual(mixedDirectory.contacts, [{
-        id: "5551999999999@c.us",
-        name: "Alice Canonical",
-        targetType: "contact",
-        targetValue: "5551999999999",
-        phoneNumber: "5551999999999",
-        chatId: "5551999999999@c.us",
-        label: "Alice Canonical",
-    }]);
-    assert.equal(evaluateCalls, 0);
-});
-
-test("WhatsAppClientManager retries Brazil mobile numbers with and without the ninth digit", async () => {
-    const manager = new WhatsAppClientManager({
-        clientId: "main",
-        authPath: "/tmp/whatsapp-auth",
-        executablePath: "/usr/bin/chromium-browser",
-        puppeteerArgs: [],
-    });
-
+test("WhatsAppClientManager retries Brazil mobile numbers with and without the ninth digit", async t => {
+    const manager = await createManager(t);
     const lookedUp = [];
     manager.client = {
-        async getNumberId(chatId) {
-            lookedUp.push(chatId);
-            return chatId === "5551997771055@c.us"
-                ? { _serialized: chatId }
-                : null;
+        async onWhatsApp(candidate) {
+            lookedUp.push(candidate);
+            return candidate === "5551997771055"
+                ? [{ jid: "5551997771055@s.whatsapp.net", exists: true }]
+                : [];
         },
     };
 
-    const resolvedChatId = await manager.resolveWhatsAppChatId("55519997771055");
+    const resolvedJid = await manager.resolveWhatsAppChatId("55519997771055");
 
     assert.deepEqual(lookedUp, [
-        "55519997771055@c.us",
-        "5551997771055@c.us",
+        "55519997771055",
+        "5551997771055",
     ]);
-    assert.equal(resolvedChatId, "5551997771055@c.us");
+    assert.equal(resolvedJid, "5551997771055@s.whatsapp.net");
 });
 
-test("WhatsAppClientManager throws a friendly error when no WhatsApp account is resolved", async () => {
-    const manager = new WhatsAppClientManager({
-        clientId: "main",
-        authPath: "/tmp/whatsapp-auth",
-        executablePath: "/usr/bin/chromium-browser",
-        puppeteerArgs: [],
-    });
-
+test("WhatsAppClientManager throws a friendly error when no WhatsApp account is resolved", async t => {
+    const manager = await createManager(t);
     manager.client = {
-        async getNumberId() {
-            return null;
+        async onWhatsApp() {
+            return [];
         },
     };
 
@@ -444,7 +201,6 @@ test("WhatsAppClientManager throws a friendly error when no WhatsApp account is 
         /could not resolve a registered account/i,
     );
 });
-
 test("POST /whatsapp/sessions creates a new session envelope", async () => {
     const whatsappClient = {
         async createSession() {
@@ -632,15 +388,10 @@ test("POST /whatsapp/sessions/login restores one session by recovery password", 
     }
 });
 
-test("WhatsAppClientManager handles a self-command message and replies with confirmation", async () => {
+test("WhatsAppClientManager handles a self-command message and replies with confirmation", async t => {
     const replies = [];
     const commands = [];
-    const manager = new WhatsAppClientManager({
-        clientId: "alpha",
-        authPath: "/tmp/whatsapp-auth",
-        executablePath: "/usr/bin/chromium-browser",
-        puppeteerArgs: [],
-    }, {
+    const manager = await createManager(t, {
         onSelfCommand: async command => {
             commands.push(command);
             return {
@@ -654,40 +405,46 @@ test("WhatsAppClientManager handles a self-command message and replies with conf
     });
 
     manager.client = {
-        info: {
-            wid: {
-                _serialized: "5551999999999@c.us",
-                user: "5551999999999",
-            },
+        user: {
+            id: "5551999999999:3@s.whatsapp.net",
+            lid: "12345678901234@lid",
+            name: "Pablo",
+        },
+        ev: new EventEmitter(),
+        async sendMessage(jid, content) {
+            replies.push({ jid, content });
+            return { key: { id: "reply-1" } };
         },
     };
+    manager.registerLifecycleHandlers();
 
-    await manager.handleCreatedMessage({
-        fromMe: true,
-        body: "@whatsbot 5551997771055 2026-04-15-19-20-30 teste message",
-        to: "5551999999999@c.us",
-        id: {
-            _serialized: "wamid-self",
-        },
-        async reply(message) {
-            replies.push(message);
-        },
+    await manager.handleMessagesUpsert({
+        type: "notify",
+        messages: [{
+            key: {
+                fromMe: true,
+                remoteJid: "5551999999999@s.whatsapp.net",
+                id: "wamid-self",
+            },
+            message: {
+                conversation: "@whatsbot 5551997771055 2026-04-15-19-20-30 teste message",
+            },
+        }],
     });
 
     assert.equal(commands.length, 1);
     assert.equal(commands[0].sessionId, "alpha");
     assert.equal(commands[0].body, "@whatsbot 5551997771055 2026-04-15-19-20-30 teste message");
-    assert.deepEqual(replies, ["Scheduled 5551997771055 for 2026-04-15T19:20:30.000Z."]);
+    assert.equal(commands[0].source.whatsappMessageId, "wamid-self");
+    assert.deepEqual(replies, [{
+        jid: "5551999999999@s.whatsapp.net",
+        content: { text: "Scheduled 5551997771055 for 2026-04-15T19:20:30.000Z." },
+    }]);
 });
 
-test("WhatsAppClientManager accepts self commands resolved through _getChatId", async () => {
+test("WhatsAppClientManager accepts self commands addressed through the LID chat", async t => {
     const commands = [];
-    const manager = new WhatsAppClientManager({
-        clientId: "alpha",
-        authPath: "/tmp/whatsapp-auth",
-        executablePath: "/usr/bin/chromium-browser",
-        puppeteerArgs: [],
-    }, {
+    const manager = await createManager(t, {
         onSelfCommand: async command => {
             commands.push(command);
             return {
@@ -701,29 +458,38 @@ test("WhatsAppClientManager accepts self commands resolved through _getChatId", 
     });
 
     manager.client = {
-        info: {
-            wid: {
-                _serialized: "5551999999999@c.us",
-                user: "5551999999999",
-            },
+        user: {
+            id: "5551999999999:3@s.whatsapp.net",
+            lid: "12345678901234@lid",
+            name: "Pablo",
+        },
+        ev: new EventEmitter(),
+        async sendMessage() {
+            return { key: { id: "reply-2" } };
         },
     };
+    manager.registerLifecycleHandlers();
 
-    await manager.handleCreatedMessage({
-        fromMe: true,
-        body: "@whatsbot 5551997771055 2026-04-15-19-20-30 teste message",
-        from: "status@broadcast",
-        to: null,
-        _getChatId() {
-            return "5551999999999@c.us";
-        },
-        async reply() {},
+    await manager.handleMessagesUpsert({
+        type: "notify",
+        messages: [{
+            key: {
+                fromMe: true,
+                remoteJid: "12345678901234@lid",
+                remoteJidAlt: "5551999999999@s.whatsapp.net",
+                id: "wamid-lid",
+            },
+            message: {
+                extendedTextMessage: {
+                    text: "@whatsbot 5551997771055 2026-04-15-19-20-30 teste message",
+                },
+            },
+        }],
     });
 
     assert.equal(commands.length, 1);
     assert.equal(commands[0].sessionId, "alpha");
 });
-
 test("parseWhatsBotCommand rejects invalid local datetimes", () => {
     assert.throws(
         () => parseWhatsBotCommand("@whatsbot 5551997771055 2026-02-31-19-20-30 teste message"),

@@ -14,7 +14,7 @@ function normalizePhoneNumber(value) {
 }
 
 /**
- * Converts a normalized phone number into the whatsapp-web.js chat id format.
+ * Converts a normalized phone number into the public contact chat id format.
  */
 function toWhatsAppChatId(phoneNumber) {
     return `${normalizePhoneNumber(phoneNumber)}@c.us`;

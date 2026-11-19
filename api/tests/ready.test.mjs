@@ -40,7 +40,7 @@ test('GET /ready returns the success envelope and WhatsApp bootstrap config', as
         assert.equal(payload.error, false);
         assert.equal(payload.data.ready, true);
         assert.equal(payload.data.service, 'api');
-        assert.deepEqual(payload.data.whatsapp.puppeteerArgs, ['--no-sandbox', '--disable-setuid-sandbox']);
+        assert.equal(payload.data.whatsapp.authPath, '/whatsapp/auth');
     } finally {
         await stopTestServer(server);
     }
