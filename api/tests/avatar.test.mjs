@@ -375,3 +375,74 @@ test("directory membership answers from the set index without cloning", async t 
     assert.equal(manager.hasChatDirectoryTarget({ targetType: "group", targetValue: "120363043210123456@g.us" }), true);
     assert.equal(manager.hasChatDirectoryTarget({ targetType: "contact", targetValue: "5551888888888" }), false);
 });
+
+/**
+ * Builds the exact error shape @hapi/boom throws from a WhatsApp binary error node.
+ *
+ * `new Boom(message, { data: 404 })` sets `isBoom`, `data`, and a 500 `output`; the WhatsApp code
+ * lives in `data`, not in `output.statusCode`.
+ *
+ * @param {string} message Boom message.
+ * @param {number} data WhatsApp error code.
+ * @returns {Error} Boom-shaped error.
+ */
+function createBoomError(message, data) {
+    const error = new Error(message);
+    error.isBoom = true;
+    error.data = data;
+    error.output = {
+        statusCode: 500,
+        payload: { statusCode: 500, error: "Internal Server Error", message },
+    };
+
+    return error;
+}
+
+test("avatar client treats Boom 404 and 401 as a missing photo and caches it", async t => {
+    t.mock.timers.enable({ apis: ["Date"], now: 3_000_000 });
+    const manager = await createManager(t);
+    let notFoundCalls = 0;
+    let unauthorizedCalls = 0;
+
+    manager.state.ready = true;
+    manager.client = {
+        async profilePictureUrl(jid) {
+            if (jid.startsWith("5511404")) {
+                notFoundCalls += 1;
+                throw createBoomError("item-not-found", 404);
+            }
+
+            unauthorizedCalls += 1;
+            throw createBoomError("not-authorized", 401);
+        },
+    };
+
+    assert.equal(await manager.getProfilePicUrl({ targetType: "contact", targetValue: "5511404000000" }), null);
+    assert.equal(await manager.getProfilePicUrl({ targetType: "contact", targetValue: "5511401000000" }), null);
+    assert.equal(notFoundCalls, 1);
+    assert.equal(unauthorizedCalls, 1);
+
+    // Missing photos are cached for the existing two-minute TTL.
+    t.mock.timers.setTime(3_000_000 + (2 * 60 * 1000) - 1);
+    assert.equal(await manager.getProfilePicUrl({ targetType: "contact", targetValue: "5511404000000" }), null);
+    assert.equal(notFoundCalls, 1);
+
+    t.mock.timers.setTime(3_000_000 + (2 * 60 * 1000) + 1);
+    assert.equal(await manager.getProfilePicUrl({ targetType: "contact", targetValue: "5511404000000" }), null);
+    assert.equal(notFoundCalls, 2);
+});
+
+test("avatar client keeps failing other Boom errors as 503", async t => {
+    const manager = await createManager(t);
+    manager.state.ready = true;
+    manager.client = {
+        async profilePictureUrl() {
+            throw createBoomError("service-unavailable", 500);
+        },
+    };
+
+    await assert.rejects(
+        () => manager.getProfilePicUrl({ targetType: "contact", targetValue: "5511999999999" }),
+        error => error instanceof HttpError && error.status === 503,
+    );
+});

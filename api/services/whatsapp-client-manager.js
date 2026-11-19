@@ -1085,6 +1085,17 @@ class WhatsAppClientManager {
                 throw error;
             }
 
+            // WhatsApp answers "item-not-found" (404) or "not-authorized" (401) when the contact
+            // or group has no visible photo. That is a normal empty result, not an outage: cache
+            // it for the missing-photo TTL so the picker does not hammer the socket.
+            if (this.isMissingProfilePictureError(error)) {
+                if (generation === this.avatarGeneration) {
+                    this.writeAvatarCache(jid, null);
+                }
+
+                return null;
+            }
+
             throw new HttpError(503, "Could not load the profile picture from WhatsApp.", error);
         } finally {
             this.releaseAvatarSlot();
@@ -1134,6 +1145,18 @@ class WhatsAppClientManager {
 
             this.avatarWaiters.push(waiter);
         });
+    }
+
+    /**
+     * Reports whether one Baileys query failure means "this chat has no visible profile picture".
+     *
+     * @param {object} error Boom-shaped failure from `profilePictureUrl`.
+     * @returns {boolean} True for 404 (item-not-found) and 401 (not-authorized).
+     */
+    isMissingProfilePictureError(error) {
+        const statusCode = Number(error?.data);
+
+        return statusCode === 404 || statusCode === 401;
     }
 
     /**
