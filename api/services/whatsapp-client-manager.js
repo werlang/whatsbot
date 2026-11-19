@@ -1885,11 +1885,10 @@ class WhatsAppClientManager {
             return null;
         }
 
-        const { user: phoneNumber, server } = splitJid(user.id);
-
         return {
-            wid: server ? `${phoneNumber}@${server}` : phoneNumber,
-            phoneNumber: /^\d{10,15}$/.test(phoneNumber) ? phoneNumber : null,
+            // Keep the public chat-id shape used before the transport swap (`<digits>@c.us`).
+            wid: toPublicChatId(user.phoneNumber || user.id) || null,
+            phoneNumber: readContactDigits(user.id, user.phoneNumber),
             pushname: user.name || user.notify || null,
             platform: "baileys",
         };

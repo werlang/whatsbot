@@ -179,7 +179,7 @@ test("open event reports ready, client information and clears the QR", async t =
     assert.equal(state.connectionState, "CONNECTED");
     assert.equal(state.loading.percent, 100);
     assert.deepEqual(state.clientInfo, {
-        wid: "5551999999999@s.whatsapp.net",
+        wid: "5551999999999@c.us",
         phoneNumber: "5551999999999",
         pushname: "Pablo Werlang",
         platform: "baileys",
