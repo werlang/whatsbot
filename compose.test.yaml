@@ -1,0 +1,39 @@
+# Isolated stack for the Baileys transport acceptance check.
+# It must never join the production `whatsbot` network or reuse production volumes.
+services:
+    api:
+        build: ./api
+        restart: unless-stopped
+        working_dir: /app
+        env_file:
+            - .env.test
+        command: npm run production
+        depends_on:
+            mysql:
+                condition: service_healthy
+        ports:
+            - 127.0.0.1:3310:3000
+        volumes:
+            - ./api:/app
+            - node_modules_api_test:/app/node_modules
+            - whatsapp_auth_test:/whatsapp/auth
+
+    mysql:
+        image: mysql:8.2
+        restart: unless-stopped
+        env_file:
+            - .env.test
+        volumes:
+            - mysql_test:/var/lib/mysql
+            - ./api/data/mysql:/docker-entrypoint-initdb.d:ro
+        healthcheck:
+            test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+            interval: 5s
+            timeout: 5s
+            retries: 40
+            start_period: 20s
+
+volumes:
+    mysql_test:
+    whatsapp_auth_test:
+    node_modules_api_test:
