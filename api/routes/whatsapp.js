@@ -1,34 +1,9 @@
 import express from "express";
 import { HttpError } from "../helpers/error.js";
-import { GROUP_TARGET_TYPE, normalizeMessageTarget } from "../helpers/message-target.js";
+import { normalizeMessageTarget } from "../helpers/message-target.js";
 import { sendSuccess } from "../helpers/response.js";
 import { normalizeSessionId } from "../helpers/session.js";
 import { whatsappSessionManager as defaultWhatsAppSessionManager } from "../services/whatsapp-session-manager.js";
-
-/**
- * Reports whether one normalized target exists in a cached session directory snapshot.
- *
- * @param {{ contacts?: Array<object>, groups?: Array<object> }} [chatDirectory] Cached directory.
- * @param {{ targetType: string, targetValue: string, phoneNumber: string|null }} target Normalized target.
- * @returns {boolean} True when the target is addressable from the cached snapshot.
- */
-function isTargetInChatDirectory(chatDirectory, target) {
-    const entries = target.targetType === GROUP_TARGET_TYPE
-        ? chatDirectory?.groups
-        : chatDirectory?.contacts;
-    const expectedValues = new Set([target.targetValue.toLowerCase()]);
-
-    if (target.targetType !== GROUP_TARGET_TYPE && target.phoneNumber) {
-        expectedValues.add(target.phoneNumber.toLowerCase());
-        expectedValues.add(`${target.phoneNumber}@c.us`.toLowerCase());
-    }
-
-    return (Array.isArray(entries) ? entries : []).some(entry => (
-        [entry?.targetValue, entry?.id, entry?.chatId, entry?.phoneNumber]
-            .filter(value => typeof value === "string" || typeof value === "number")
-            .some(value => expectedValues.has(String(value).trim().toLowerCase()))
-    ));
-}
 
 /**
  * Builds the WhatsApp session routes with an injectable client manager.
@@ -114,13 +89,14 @@ function createWhatsAppRouter({ whatsappClientManager = defaultWhatsAppSessionMa
                 targetType: req.query.targetType,
                 targetValue: req.query.targetValue,
             });
-            const session = await whatsappClientManager.getSessionState(sessionId);
 
-            if (!session?.ready) {
+            // Readiness and membership are O(1) checks on the active session: cloning the whole
+            // directory on every avatar request turned the picker into a CPU hog.
+            if (!whatsappClientManager.isSessionReady?.(sessionId)) {
                 throw new HttpError(503, "WhatsApp session is not ready to load profile pictures.");
             }
 
-            if (!isTargetInChatDirectory(session.chatDirectory, target)) {
+            if (!whatsappClientManager.hasDirectoryTarget?.(sessionId, target)) {
                 throw new HttpError(404, "Target is not in the session contact directory.");
             }
 

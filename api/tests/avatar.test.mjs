@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { createApp } from "../app.js";
 import { HttpError } from "../helpers/error.js";
@@ -7,9 +10,6 @@ import { WhatsAppClientManager } from "../services/whatsapp-client-manager.js";
 
 const baseConfig = {
     clientId: "main",
-    authPath: "/tmp/whatsbot-avatar-test-auth",
-    executablePath: "/usr/bin/chromium-browser",
-    puppeteerArgs: [],
 };
 
 const silentLogger = {
@@ -17,27 +17,19 @@ const silentLogger = {
     warn() {},
 };
 
-const chatDirectory = {
-    contacts: [{
-        id: "5551999999999@c.us",
-        name: "Alice",
-        targetType: "contact",
-        targetValue: "5551999999999",
-        phoneNumber: "5551999999999",
-        chatId: "5551999999999@c.us",
-        label: "Alice",
-    }],
-    groups: [{
-        id: "120363043210123456@g.us",
-        name: "Launch Team",
-        targetType: "group",
-        targetValue: "120363043210123456@g.us",
-        phoneNumber: null,
-        chatId: "120363043210123456@g.us",
-        label: "Launch Team",
-    }],
-    refreshedAt: "2026-04-15T12:00:00.000Z",
-};
+/**
+ * Creates one manager with a temp auth directory.
+ *
+ * @param {object} t Test context.
+ * @returns {Promise<object>} Client manager.
+ */
+async function createManager(t) {
+    const authPath = await fs.mkdtemp(path.join(os.tmpdir(), "whatsbot-avatar-"));
+    t.after(() => fs.rm(authPath, { recursive: true, force: true }));
+    const manager = new WhatsAppClientManager({ ...baseConfig, authPath }, { logger: silentLogger });
+    t.after(() => manager.destroy());
+    return manager;
+}
 
 /**
  * Starts the API app on an ephemeral port.
@@ -90,22 +82,44 @@ async function requestAvatar(port, targetType, targetValue) {
     });
 }
 
+/**
+ * Builds one avatar-route double with the cheap readiness and membership checks.
+ *
+ * @param {object} [overrides] Overrides for individual operations.
+ * @returns {object} Session manager double.
+ */
+function createRouteDouble(overrides = {}) {
+    return {
+        async assertAuthorizedSession() {},
+        isSessionReady: () => true,
+        hasDirectoryTarget: () => true,
+        async getProfilePicUrl() {
+            return null;
+        },
+        ...overrides,
+    };
+}
+
 test("avatar route authorizes before reading the directory", async () => {
     let directoryReads = 0;
     let avatarLookups = 0;
-    const whatsappClient = {
+    const whatsappClient = createRouteDouble({
         async assertAuthorizedSession() {
             throw new HttpError(401, "Session token is invalid.");
         },
-        async getSessionState() {
+        isSessionReady() {
             directoryReads += 1;
-            return { ready: true, chatDirectory };
+            return true;
+        },
+        hasDirectoryTarget() {
+            directoryReads += 1;
+            return true;
         },
         async getProfilePicUrl() {
             avatarLookups += 1;
             return "https://cdn.example/photo.jpg";
         },
-    };
+    });
     const server = await startTestServer(whatsappClient);
     const { port } = server.address();
 
@@ -124,18 +138,18 @@ test("avatar route authorizes before reading the directory", async () => {
     }
 });
 
-test("avatar route rejects an unknown target with 404", async () => {
+test("avatar route rejects an unknown target with 404 without cloning the directory", async () => {
     let avatarLookups = 0;
-    const whatsappClient = {
-        async assertAuthorizedSession() {},
-        async getSessionState() {
-            return { ready: true, chatDirectory };
+    const whatsappClient = createRouteDouble({
+        getSessionState() {
+            throw new Error("getSessionState must not run on the avatar path");
         },
+        hasDirectoryTarget: () => false,
         async getProfilePicUrl() {
             avatarLookups += 1;
             return "https://cdn.example/photo.jpg";
         },
-    };
+    });
     const server = await startTestServer(whatsappClient);
     const { port } = server.address();
 
@@ -153,15 +167,14 @@ test("avatar route rejects an unknown target with 404", async () => {
 });
 
 test("avatar route returns url null for a contact without a photo", async () => {
-    const whatsappClient = {
-        async assertAuthorizedSession() {},
-        async getSessionState() {
-            return { ready: true, chatDirectory };
+    const whatsappClient = createRouteDouble({
+        getSessionState() {
+            throw new Error("getSessionState must not run on the avatar path");
         },
         async getProfilePicUrl() {
             return undefined;
         },
-    };
+    });
     const server = await startTestServer(whatsappClient);
     const { port } = server.address();
 
@@ -184,16 +197,13 @@ test("avatar route returns url null for a contact without a photo", async () => 
 
 test("avatar route returns 503 when the session client is not ready", async () => {
     let avatarLookups = 0;
-    const whatsappClient = {
-        async assertAuthorizedSession() {},
-        async getSessionState() {
-            return { ready: false, chatDirectory: { contacts: [], groups: [], refreshedAt: null } };
-        },
+    const whatsappClient = createRouteDouble({
+        isSessionReady: () => false,
         async getProfilePicUrl() {
             avatarLookups += 1;
             return null;
         },
-    };
+    });
     const server = await startTestServer(whatsappClient);
     const { port } = server.address();
 
@@ -213,16 +223,15 @@ test("avatar route returns 503 when the session client is not ready", async () =
 
 test("avatar route rejects a malformed target with 400", async () => {
     let directoryReads = 0;
-    const whatsappClient = {
-        async assertAuthorizedSession() {},
-        async getSessionState() {
+    const whatsappClient = createRouteDouble({
+        isSessionReady() {
             directoryReads += 1;
-            return { ready: true, chatDirectory };
+            return true;
         },
         async getProfilePicUrl() {
             return null;
         },
-    };
+    });
     const server = await startTestServer(whatsappClient);
     const { port } = server.address();
 
@@ -241,16 +250,17 @@ test("avatar route rejects a malformed target with 400", async () => {
 
 test("avatar client shares one lookup per JID and caches the hit for fifteen minutes", async t => {
     t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
-    const manager = new WhatsAppClientManager(baseConfig, { logger: silentLogger });
+    const manager = await createManager(t);
     let calls = 0;
     let releaseLookup;
     let mode = "pending";
 
     manager.state.ready = true;
     manager.client = {
-        getProfilePicUrl(jid) {
+        profilePictureUrl(jid, type) {
             calls += 1;
-            assert.equal(jid, "5551999999999@c.us");
+            assert.equal(jid, "5551999999999@s.whatsapp.net");
+            assert.equal(type, "preview");
 
             if (mode === "pending") {
                 return new Promise(resolve => {
@@ -287,12 +297,12 @@ test("avatar client shares one lookup per JID and caches the hit for fifteen min
 
 test("avatar client caches a missing photo for two minutes", async t => {
     t.mock.timers.enable({ apis: ["Date"], now: 2_000_000 });
-    const manager = new WhatsAppClientManager(baseConfig, { logger: silentLogger });
+    const manager = await createManager(t);
     let calls = 0;
 
     manager.state.ready = true;
     manager.client = {
-        async getProfilePicUrl() {
+        async profilePictureUrl() {
             calls += 1;
             return undefined;
         },
@@ -311,13 +321,34 @@ test("avatar client caches a missing photo for two minutes", async t => {
     assert.equal(calls, 2);
 });
 
-test("avatar client fails one lookup after the five second deadline", async t => {
-    t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 5_000 });
-    const manager = new WhatsAppClientManager(baseConfig, { logger: silentLogger });
+test("avatar client resolves group pictures through the group jid", async t => {
+    const manager = await createManager(t);
+    let received = null;
 
     manager.state.ready = true;
     manager.client = {
-        getProfilePicUrl() {
+        async profilePictureUrl(jid, type) {
+            received = { jid, type };
+            return "https://cdn.example/group.jpg";
+        },
+    };
+
+    const url = await manager.getProfilePicUrl({
+        targetType: "group",
+        targetValue: "120363043210123456@g.us",
+    });
+
+    assert.equal(url, "https://cdn.example/group.jpg");
+    assert.deepEqual(received, { jid: "120363043210123456@g.us", type: "preview" });
+});
+
+test("avatar client fails one lookup after the five second deadline", async t => {
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 5_000 });
+    const manager = await createManager(t);
+
+    manager.state.ready = true;
+    manager.client = {
+        profilePictureUrl() {
             return new Promise(() => {});
         },
     };
@@ -333,4 +364,14 @@ test("avatar client fails one lookup after the five second deadline", async t =>
     await new Promise(resolve => process.nextTick(resolve));
     await t.mock.timers.tick(5000);
     await rejection;
+});
+
+test("directory membership answers from the set index without cloning", async t => {
+    const manager = await createManager(t);
+    manager.directoryTargetIndex = new Set(["contact:5551999999999", "group:120363043210123456@g.us"]);
+
+    assert.equal(manager.hasChatDirectoryTarget({ targetType: "contact", targetValue: "5551999999999" }), true);
+    assert.equal(manager.hasChatDirectoryTarget({ targetValue: "5551999999999@c.us" }), true);
+    assert.equal(manager.hasChatDirectoryTarget({ targetType: "group", targetValue: "120363043210123456@g.us" }), true);
+    assert.equal(manager.hasChatDirectoryTarget({ targetType: "contact", targetValue: "5551888888888" }), false);
 });
