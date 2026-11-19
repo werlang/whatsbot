@@ -227,6 +227,9 @@ class WhatsAppClientManager {
         this.directoryPersistTimer = null;
         this.directoryRecords = new Map();
         this.directoryTargetIndex = new Set();
+        this.lidToPn = new Map();
+        this.unresolvedLidContacts = new Map();
+        this.lidResolutionInFlight = new Set();
         this.ownJids = new Set();
         this.processedMessageIds = new Set();
         this.qrGeneration = 0;
@@ -448,6 +451,7 @@ class WhatsAppClientManager {
         on("connection.update", update => this.handleConnectionUpdate(update));
         on("messages.upsert", payload => this.handleMessagesUpsert(payload));
         on("messaging-history.set", payload => this.ingestHistorySet(payload));
+        on("lid-mapping.update", mapping => this.handleLidMappingUpdate(mapping));
         on("contacts.upsert", contacts => this.mergeContactRecords(contacts));
         on("contacts.update", contacts => this.mergeContactRecords(contacts));
         on("chats.upsert", chats => this.mergeChatRecords(chats));
@@ -1130,6 +1134,18 @@ class WhatsAppClientManager {
     }
 
     /**
+     * Reports whether one Baileys query failure means "this chat has no visible profile picture".
+     *
+     * @param {object} error Boom-shaped failure from `profilePictureUrl`.
+     * @returns {boolean} True for 404 (item-not-found) and 401 (not-authorized).
+     */
+    isMissingProfilePictureError(error) {
+        const statusCode = Number(error?.data);
+
+        return statusCode === 404 || statusCode === 401;
+    }
+
+    /**
      * Acquires one of the four profile picture lookup slots, waiting until the deadline.
      *
      * @param {number} deadline Absolute deadline in milliseconds.
@@ -1172,18 +1188,6 @@ class WhatsAppClientManager {
 
             this.avatarWaiters.push(waiter);
         });
-    }
-
-    /**
-     * Reports whether one Baileys query failure means "this chat has no visible profile picture".
-     *
-     * @param {object} error Boom-shaped failure from `profilePictureUrl`.
-     * @returns {boolean} True for 404 (item-not-found) and 401 (not-authorized).
-     */
-    isMissingProfilePictureError(error) {
-        const statusCode = Number(error?.data);
-
-        return statusCode === 404 || statusCode === 401;
     }
 
     /**
@@ -1299,10 +1303,15 @@ class WhatsAppClientManager {
     /**
      * Ingests one history-sync batch into the directory.
      *
-     * @param {{ chats?: Array<object>, contacts?: Array<object> }} payload History sync payload.
+     * @param {{ chats?: Array<object>, contacts?: Array<object>, lidPnMappings?: Array<object> }} payload History sync payload.
      */
     ingestHistorySet(payload = {}) {
         let changed = false;
+
+        // Seed LID -> PN mappings before contacts, so LID-only contacts resolve in this same batch.
+        for (const mapping of Array.isArray(payload?.lidPnMappings) ? payload.lidPnMappings : []) {
+            changed = this.storeLidMapping(mapping) || changed;
+        }
 
         for (const chat of Array.isArray(payload?.chats) ? payload.chats : []) {
             changed = this.mergeChatRecord(chat) || changed;
@@ -1347,24 +1356,6 @@ class WhatsAppClientManager {
     }
 
     /**
-     * Applies one batch of directory merges and rebuilds once when anything changed.
-     *
-     * @param {Array<object>} entries Raw models.
-     * @param {(entry: object) => boolean} merge One merge operation.
-     */
-    mergeDirectoryBatch(entries, merge) {
-        let changed = false;
-
-        for (const entry of entries) {
-            changed = merge(entry) || changed;
-        }
-
-        if (changed) {
-            this.rebuildChatDirectory();
-        }
-    }
-
-    /**
      * Applies the authoritative participated-groups snapshot and drops groups that are gone.
      *
      * Contacts are never pruned: `groupFetchAllParticipating` only covers groups, and a missing
@@ -1393,6 +1384,24 @@ class WhatsAppClientManager {
                 this.directoryRecords.delete(record.id);
                 changed = true;
             }
+        }
+
+        if (changed) {
+            this.rebuildChatDirectory();
+        }
+    }
+
+    /**
+     * Applies one batch of directory merges and rebuilds once when anything changed.
+     *
+     * @param {Array<object>} entries Raw models.
+     * @param {(entry: object) => boolean} merge One merge operation.
+     */
+    mergeDirectoryBatch(entries, merge) {
+        let changed = false;
+
+        for (const entry of entries) {
+            changed = merge(entry) || changed;
         }
 
         if (changed) {
@@ -1436,6 +1445,10 @@ class WhatsAppClientManager {
         const target = this.parseContactTarget(contact);
 
         if (!target) {
+            // A LID-only contact is not addressable until WhatsApp reveals its PN mapping. Keep
+            // it around and re-resolve it when history, `lid-mapping.update` or the socket's
+            // mapping store later provides the PN.
+            this.queueLidContactResolution(contact);
             return false;
         }
 
@@ -1449,6 +1462,94 @@ class WhatsAppClientManager {
         });
 
         return created || named;
+    }
+
+    /**
+     * Stores one LID -> PN mapping and re-resolves a contact that was waiting for it.
+     *
+     * @param {{ lid?: string, pn?: string }} mapping Mapping with jids.
+     * @returns {boolean} True when a previously dropped contact became addressable.
+     */
+    storeLidMapping(mapping) {
+        const lidJid = normalizeJid(mapping?.lid);
+        const pnJid = normalizeJid(mapping?.pn);
+
+        if (!lidJid || !pnJid) {
+            return false;
+        }
+
+        this.lidToPn.set(lidJid, pnJid);
+
+        const pendingContact = this.unresolvedLidContacts.get(lidJid);
+
+        if (!pendingContact) {
+            return false;
+        }
+
+        this.unresolvedLidContacts.delete(lidJid);
+        this.mergeContactRecord({ ...pendingContact, phoneNumber: pnJid });
+
+        return true;
+    }
+
+    /**
+     * Applies one `lid-mapping.update` event and rebuilds when it unblocks a contact.
+     *
+     * @param {{ lid?: string, pn?: string }} mapping Mapping with jids.
+     */
+    handleLidMappingUpdate(mapping) {
+        if (this.storeLidMapping(mapping)) {
+            this.rebuildChatDirectory();
+        }
+    }
+
+    /**
+     * Remembers one LID-only contact and asks the socket for its PN at most once per LID.
+     *
+     * @param {object} contact Baileys contact model.
+     */
+    queueLidContactResolution(contact) {
+        const lidJid = this.readContactLid(contact);
+
+        if (!lidJid) {
+            return;
+        }
+
+        this.unresolvedLidContacts.set(lidJid, contact);
+
+        const mappingStore = this.client?.signalRepository?.lidMapping;
+
+        if (this.lidResolutionInFlight.has(lidJid) || typeof mappingStore?.getPNForLID !== "function") {
+            return;
+        }
+
+        this.lidResolutionInFlight.add(lidJid);
+        Promise.resolve(mappingStore.getPNForLID(lidJid))
+            .then(pn => {
+                if (pn && this.storeLidMapping({ lid: lidJid, pn })) {
+                    this.rebuildChatDirectory();
+                }
+            })
+            .catch(() => {})
+            .finally(() => this.lidResolutionInFlight.delete(lidJid));
+    }
+
+    /**
+     * Returns the normalized LID jid carried by a contact model.
+     *
+     * @param {object} contact Baileys contact model.
+     * @returns {string} `@lid` jid or an empty string.
+     */
+    readContactLid(contact) {
+        const explicitLid = normalizeJid(contact?.lid);
+
+        if (explicitLid) {
+            return explicitLid;
+        }
+
+        const id = normalizeJid(contact?.id);
+
+        return id.endsWith("@lid") ? id : "";
     }
 
     /**
@@ -1478,7 +1579,9 @@ class WhatsAppClientManager {
      * @returns {object|null} Target fields or null when the contact is not addressable by phone.
      */
     parseContactTarget(contact) {
-        const digits = readContactDigits(contact?.phoneNumber, contact?.id);
+        const lidJid = this.readContactLid(contact);
+        const mappedPn = lidJid ? this.lidToPn.get(lidJid) : null;
+        const digits = readContactDigits(contact?.phoneNumber, contact?.id, mappedPn);
 
         if (!digits) {
             return null;

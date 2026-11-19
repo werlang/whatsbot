@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { WhatsAppClientManager } from "../services/whatsapp-client-manager.js";
 import { WhatsAppSessionManager } from "../services/whatsapp-session-manager.js";
 import { readRecipientDirectory } from "../../web/public/js/helpers/recipient.js";
@@ -73,8 +74,21 @@ async function createReadyManager(t, { socket = createFakeSocket(), config = bas
 /**
  * Emits one history batch with the provided chats and contacts.
  */
-function emitHistory(socket, chats, contacts) {
-    socket.ev.emit("messaging-history.set", { chats, contacts, messages: [] });
+function emitHistory(socket, chats, contacts, lidPnMappings = []) {
+    socket.ev.emit("messaging-history.set", { chats, contacts, lidPnMappings, messages: [] });
+}
+
+/** Waits until a predicate holds, yielding real time between checks. */
+async function waitFor(predicate, { attempts = 1000 } = {}) {
+    for (let index = 0; index < attempts; index += 1) {
+        if (await predicate()) {
+            return;
+        }
+
+        await delay(1);
+    }
+
+    throw new Error("condition was not met in time");
 }
 
 test("directory builds contacts and groups from history sync events", async t => {
@@ -384,6 +398,67 @@ test("directory keeps a real saved name behind an address-shaped chat label", as
     assert.equal(byId.get("555391565003@c.us")?.name, "Real Saved Name");
     assert.equal(byId.has("555195171104@c.us"), false, "an address is not a name");
     assert.equal(directory.groups[0]?.name, "2026");
+});
+
+test("directory resolves LID-only contacts from history lidPnMappings", async t => {
+    const socket = createFakeSocket();
+    const manager = await createReadyManager(t, { socket });
+
+    emitHistory(socket, [], [
+        { id: "99999999999999@lid", name: "LID Alice" },
+    ], [
+        { lid: "99999999999999@lid", pn: "5551999999999@s.whatsapp.net" },
+    ]);
+
+    const directory = manager.getSessionState().chatDirectory;
+
+    assert.deepEqual(directory.contacts.map(entry => [entry.id, entry.name]), [
+        ["5551999999999@c.us", "LID Alice"],
+    ]);
+});
+
+test("directory re-resolves an already-seen LID contact when lid-mapping.update arrives", async t => {
+    const socket = createFakeSocket();
+    const manager = await createReadyManager(t, { socket });
+
+    socket.ev.emit("contacts.upsert", [
+        { id: "88888888888888@lid", name: "LID Bob" },
+        { id: "555391565003@s.whatsapp.net", name: "Regular Contact" },
+    ]);
+
+    assert.deepEqual(manager.getSessionState().chatDirectory.contacts.map(entry => entry.name), ["Regular Contact"]);
+
+    socket.ev.emit("lid-mapping.update", {
+        lid: "88888888888888@lid",
+        pn: "5551888888888@s.whatsapp.net",
+    });
+
+    assert.deepEqual(
+        manager.getSessionState().chatDirectory.contacts.map(entry => [entry.id, entry.name]),
+        [
+            ["5551888888888@c.us", "LID Bob"],
+            ["555391565003@c.us", "Regular Contact"],
+        ],
+    );
+});
+
+test("directory asks the socket LID mapping store for an unresolved contact PN", async t => {
+    const socket = createFakeSocket();
+    socket.signalRepository = {
+        lidMapping: {
+            async getPNForLID(lid) {
+                return lid === "77777777777777@lid" ? "5551777777777@s.whatsapp.net" : null;
+            },
+        },
+    };
+    const manager = await createReadyManager(t, { socket });
+
+    socket.ev.emit("contacts.upsert", [
+        { id: "77777777777777@lid", name: "LID Carol" },
+    ]);
+
+    await waitFor(() => manager.getSessionState().chatDirectory.contacts
+        .some(entry => entry.id === "5551777777777@c.us" && entry.name === "LID Carol"));
 });
 
 test("group refresh prunes groups missing from the authoritative snapshot and keeps contacts", async t => {
