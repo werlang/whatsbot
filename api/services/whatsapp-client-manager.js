@@ -833,7 +833,7 @@ class WhatsAppClientManager {
                 }
 
                 if (groups) {
-                    this.mergeGroupRecords(groups);
+                    this.applyGroupSnapshot(groups);
                 }
 
                 this.lastGroupDirectoryFetchAt = Date.now();
@@ -1357,6 +1357,42 @@ class WhatsAppClientManager {
 
         for (const entry of entries) {
             changed = merge(entry) || changed;
+        }
+
+        if (changed) {
+            this.rebuildChatDirectory();
+        }
+    }
+
+    /**
+     * Applies the authoritative participated-groups snapshot and drops groups that are gone.
+     *
+     * Contacts are never pruned: `groupFetchAllParticipating` only covers groups, and a missing
+     * contact in a partial sync is not evidence that the contact disappeared.
+     *
+     * @param {Array<object>|Object<string, object>} groups Group metadata models.
+     */
+    applyGroupSnapshot(groups) {
+        const list = Array.isArray(groups) ? groups : Object.values(groups ?? {});
+        const knownGroupIds = new Set();
+        let changed = false;
+
+        for (const group of list) {
+            const target = this.parseDirectoryTarget(group?.id);
+
+            if (!target || target.targetType !== GROUP_TARGET_TYPE) {
+                continue;
+            }
+
+            knownGroupIds.add(target.id);
+            changed = this.mergeGroupRecord(group) || changed;
+        }
+
+        for (const record of [...this.directoryRecords.values()]) {
+            if (record.targetType === GROUP_TARGET_TYPE && !knownGroupIds.has(record.id)) {
+                this.directoryRecords.delete(record.id);
+                changed = true;
+            }
         }
 
         if (changed) {

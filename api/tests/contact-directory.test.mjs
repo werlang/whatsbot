@@ -258,6 +258,10 @@ test("directory preserves legacy picker fields and session snapshot isolation", 
     const manager = await createReadyManager(t, { socket });
     socket.ev.emit("contacts.upsert", mixedContacts.filter(entry => !entry.id.endsWith("@g.us")));
     socket.ev.emit("chats.upsert", mixedContacts.filter(entry => entry.id.endsWith("@g.us")));
+    socket.groupFetchAllParticipating = async () => ({
+        "120363043210123456@g.us": { id: "120363043210123456@g.us", subject: "Águias" },
+        "120363043210123457@g.us": { id: "120363043210123457@g.us", subject: "Zulu equipe" },
+    });
 
     const sessions = new WhatsAppSessionManager({
         config: baseConfig,
@@ -380,4 +384,27 @@ test("directory keeps a real saved name behind an address-shaped chat label", as
     assert.equal(byId.get("555391565003@c.us")?.name, "Real Saved Name");
     assert.equal(byId.has("555195171104@c.us"), false, "an address is not a name");
     assert.equal(directory.groups[0]?.name, "2026");
+});
+
+test("group refresh prunes groups missing from the authoritative snapshot and keeps contacts", async t => {
+    const socket = createFakeSocket();
+    const manager = await createReadyManager(t, { socket });
+
+    socket.ev.emit("chats.upsert", [
+        { id: "120363043210123456@g.us", name: "Keep" },
+        { id: "120363043210123457@g.us", name: "Gone" },
+    ]);
+    socket.ev.emit("contacts.upsert", [
+        { id: "555391565003@s.whatsapp.net", name: "Alice" },
+    ]);
+
+    socket.groupFetchAllParticipating = async () => ({
+        "120363043210123456@g.us": { id: "120363043210123456@g.us", subject: "Keep" },
+    });
+
+    const directory = await manager.refreshChatDirectory({ force: true });
+
+    assert.deepEqual(directory.groups.map(entry => entry.id), ["120363043210123456@g.us"]);
+    assert.deepEqual(directory.contacts.map(entry => entry.name), ["Alice"]);
+    assert.deepEqual(manager.getSessionState().chatDirectory.groups.map(entry => entry.id), ["120363043210123456@g.us"]);
 });
