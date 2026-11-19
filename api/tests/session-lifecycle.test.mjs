@@ -150,18 +150,20 @@ test("B1 boot failure retries fast with growing delays, then keeps a slow retry 
     assert.equal(manager.getSessionState().reconnectAttempt, 6);
 });
 
-test("B1 loggedOut close cancels retries and reports that a new QR is needed", async t => {
+test("B1 loggedOut close cancels automatic retries and an explicit boot re-pairs", async t => {
     const { manager, clients } = await createClientHarness(t);
     await manager.initialize();
     clients[0].ev.emit("connection.update", closeUpdate(428));
     clients[0].ev.emit("connection.update", closeUpdate(401));
     t.mock.timers.tick(100000);
     await waitFor(() => clients[0].endCalls === 1);
-    await manager.initialize();
     assert.equal(clients.length, 1);
     assert.equal(manager.getSessionState().nextReconnectAt, null);
     assert.equal(manager.getSessionState().needsQrCode, true);
-    assert.equal(clients[0].endCalls, 1);
+
+    await manager.initialize();
+    assert.equal(clients.length, 2);
+    assert.equal(manager.getSessionState().needsQrCode, false);
 });
 
 test("B1 initialize replaces a known-dead client instead of returning it", async t => {
@@ -353,7 +355,7 @@ test("B6 a ready event cancels a reconnect already waiting for the original boot
         return client;
     };
     const initialization = manager.initialize();
-    await settle();
+    await waitFor(() => clients.length === 1);
     clients[0].ev.emit("connection.update", closeUpdate(428));
     t.mock.timers.tick(0);
     await settle();

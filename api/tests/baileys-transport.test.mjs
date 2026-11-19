@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { WhatsAppClientManager } from "../services/whatsapp-client-manager.js";
+import { WhatsAppSessionManager } from "../services/whatsapp-session-manager.js";
 
 const silentLogger = {
     error() {},
@@ -25,7 +26,7 @@ const settle = async () => {
 /** Waits until a predicate holds, yielding real time between checks. */
 async function waitFor(predicate, { attempts = 1000 } = {}) {
     for (let index = 0; index < attempts; index += 1) {
-        if (predicate()) {
+        if (await predicate()) {
             return;
         }
 
@@ -186,30 +187,63 @@ test("open event reports ready, client information and clears the QR", async t =
     });
 });
 
-test("loggedOut close requires a new QR and never reconnects", async t => {
-    const { manager, sockets } = await createHarness(t);
-    await manager.initialize();
-    sockets[0].ev.emit("connection.update", { connection: "open" });
+test("loggedOut purges revoked credentials, keeps the directory snapshot and re-pairs on an explicit boot", async t => {
+    const { manager, sockets, authPath } = await createHarness(t);
+    const authDirectory = path.join(authPath, "baileys", "main");
+    const credsPath = path.join(authDirectory, "creds.json");
+    const keyPath = path.join(authDirectory, "app-state-sync-key-1.json");
+    const snapshotPath = path.join(authDirectory, "chat-directory.json");
 
-    sockets[0].ev.emit("connection.update", {
-        connection: "close",
-        lastDisconnect: { error: { output: { statusCode: 401 } } },
-    });
+    await manager.initialize();
+    pairSocket(sockets[0]);
+    sockets[0].ev.emit("connection.update", { connection: "open" });
     await flush();
+
+    await fs.mkdir(authDirectory, { recursive: true });
+    await fs.writeFile(credsPath, JSON.stringify({ registered: true, me: { id: "5551999999999@s.whatsapp.net" } }));
+    await fs.writeFile(keyPath, "{}");
+    sockets[0].ev.emit("contacts.upsert", [{ id: "555391565003@s.whatsapp.net", name: "Alice" }]);
+    await manager.flushChatDirectory();
+    assert.equal(JSON.parse(await fs.readFile(snapshotPath, "utf8")).contacts.length, 1);
+
+    sockets[0].ev.emit("connection.update", closeUpdate(401));
+    await waitFor(async () => {
+        try {
+            await fs.access(credsPath);
+            return false;
+        } catch {
+            return true;
+        }
+    });
+
+    await assert.rejects(fs.access(credsPath));
+    await assert.rejects(fs.access(keyPath));
+    assert.equal(JSON.parse(await fs.readFile(snapshotPath, "utf8")).contacts.length, 1);
+    assert.equal(sockets[0].endCalls, 1);
 
     const state = manager.getSessionState();
     assert.equal(state.status, "disconnected");
     assert.equal(state.needsQrCode, true);
     assert.equal(state.disconnectReason, "loggedOut");
     assert.equal(state.nextReconnectAt, null);
-    assert.equal(sockets[0].endCalls, 1);
 
-    t.mock.timers.tick(600000);
-    await flush();
-    await manager.initialize();
+    // A restart must not consider the revoked pairing restorable.
+    const sessions = new WhatsAppSessionManager({
+        config: { ...manager.config, authPath },
+        logger: silentLogger,
+        clientFactory: () => manager,
+        sessionAccessStore: { async initialize() {}, async listSessionIds() { return []; } },
+    });
+    assert.equal(await sessions.hasAuthProfile("main"), false);
 
-    assert.equal(sockets.length, 1);
-    assert.equal(manager.getSessionState().needsQrCode, true);
+    // The id and token are unchanged: an explicit session read boots a fresh QR.
+    await sessions.getSessionState("main");
+    await waitFor(() => sockets.length === 2);
+    assert.equal(manager.getSessionState().needsQrCode, false);
+
+    sockets[1].ev.emit("connection.update", { qr: "fresh-after-logout" });
+    await waitFor(() => manager.getSessionState().hasQrCode === true);
+    assert.equal(manager.getSessionState().status, "qr");
 });
 
 test("transient close schedules the bounded reconnect and recovers on a new socket", async t => {
@@ -316,7 +350,7 @@ test("failed closes beyond the fast budget schedule a slow retry and a later ope
     assert.equal(state.nextReconnectAt, new Date(71000).toISOString());
 });
 
-test("loggedOut after the fast budget is exhausted still stops permanently", async t => {
+test("loggedOut after the fast budget is exhausted stops automatic retries but re-pairs on an explicit boot", async t => {
     const { manager, sockets } = await createHarness(t, {
         config: { reconnectMaxAttempts: 1, reconnectSlowRetryMs: 60000 },
     });
@@ -338,7 +372,8 @@ test("loggedOut after the fast budget is exhausted still stops permanently", asy
     assert.equal(sockets.length, 2);
 
     await manager.initialize();
-    assert.equal(sockets.length, 2);
+    assert.equal(sockets.length, 3);
+    assert.equal(manager.getSessionState().needsQrCode, false);
 });
 
 test("a stale socket cannot publish events after it was replaced", async t => {

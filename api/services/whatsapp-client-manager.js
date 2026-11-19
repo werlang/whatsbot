@@ -215,6 +215,7 @@ class WhatsAppClientManager {
         this.createAuthState = createAuthState;
         this.client = null;
         this.saveCreds = null;
+        this.saveCredsPromise = null;
         this.initializingPromise = null;
         this.groupDirectoryRefreshPromise = null;
         this.groupDirectoryRefreshClient = null;
@@ -262,14 +263,30 @@ class WhatsAppClientManager {
     }
 
     /**
-     * Boots a usable socket; state polls never bypass a scheduled or exhausted retry.
+     * Boots a usable socket; automatic recovery never bypasses a pending retry or a stop.
+     * An explicit boot after a logout is a re-pair: revoked credentials are already purged, so the
+     * next socket offers a fresh QR without changing the session id or access token.
      *
      * @param {{ reconnect?: boolean }} [options] Recovery flag.
      * @returns {Promise<object|null>} Socket or null when booting is skipped.
      */
     async initialize({ reconnect = false } = {}) {
-        if (this.destroyed || this.state.needsQrCode || (!reconnect && this.reconnectStopped)) {
+        if (this.destroyed) {
             return null;
+        }
+
+        if (this.state.needsQrCode || this.reconnectStopped) {
+            if (reconnect) {
+                return null;
+            }
+
+            this.reconnectStopped = false;
+            this.updateState({
+                needsQrCode: false,
+                reconnectAttempt: 0,
+                nextReconnectAt: null,
+                disconnectReason: null,
+            });
         }
 
         if (this.initializingPromise) {
@@ -418,7 +435,7 @@ class WhatsAppClientManager {
         // Credentials must be persisted even while a replacement is settling: losing them means a
         // new QR for the user.
         emitter.on("creds.update", () => {
-            Promise.resolve(this.saveCreds?.()).catch(error => {
+            this.saveCredsPromise = Promise.resolve(this.saveCreds?.()).catch(error => {
                 this.logger.error(`Could not persist WhatsApp credentials for session ${this.config.clientId}:`, error?.message || error);
             });
 
@@ -537,7 +554,17 @@ class WhatsAppClientManager {
         if (loggedOut) {
             this.cancelReconnect();
             this.reconnectStopped = true;
-            this.disposeClient().catch(() => {});
+
+            // WhatsApp revoked the pairing. Keeping the dead credentials makes every later boot
+            // fail as loggedOut again, so remove the auth files but keep the directory snapshot:
+            // an explicit session read then boots a fresh QR with the same session id/token.
+            try {
+                await this.disposeClient();
+                await this.purgeBaileysCredentials();
+            } catch (error) {
+                this.logger.error(`Could not purge revoked WhatsApp credentials for session ${this.config.clientId}:`, error?.message || error);
+            }
+
             return;
         }
 
@@ -1875,10 +1902,14 @@ class WhatsAppClientManager {
      */
     async disposeClient() {
         this.clearAvatarCache();
-        this.saveCreds = null;
         this.ownJids = new Set();
 
+        const pendingSave = this.saveCredsPromise;
+        this.saveCreds = null;
+        this.saveCredsPromise = null;
+
         if (!this.client) {
+            await pendingSave?.catch(() => {});
             return;
         }
 
@@ -1896,6 +1927,40 @@ class WhatsAppClientManager {
         } catch {
             // The socket may already be closed.
         }
+
+        // A credentials write that started before disposal must land before a purge removes files.
+        await pendingSave?.catch(() => {});
+    }
+
+    /**
+     * Deletes the revoked Baileys auth files for this session, keeping the directory snapshot.
+     *
+     * Only `/whatsapp/auth/baileys/<sessionId>/` is touched; legacy `session-*` profiles and the
+     * app-level session-access registry are never read or removed. Without this, `creds.json`
+     * survives a logout and every later boot (including after a restart) fails as loggedOut again.
+     *
+     * @returns {Promise<void>} Resolves after the auth files are gone.
+     */
+    async purgeBaileysCredentials() {
+        const authDirectory = this.getAuthDirectory();
+        let entries = [];
+
+        try {
+            entries = await fs.readdir(authDirectory, { withFileTypes: true });
+        } catch (error) {
+            if (error?.code === "ENOENT") {
+                return;
+            }
+
+            throw error;
+        }
+
+        const preserved = new Set([DIRECTORY_FILE_NAME, `${DIRECTORY_FILE_NAME}.tmp`]);
+        const authFiles = entries
+            .filter(entry => entry.isFile() && !preserved.has(entry.name))
+            .map(entry => path.join(authDirectory, entry.name));
+
+        await Promise.all(authFiles.map(filePath => fs.rm(filePath, { force: true })));
     }
 
     /**
