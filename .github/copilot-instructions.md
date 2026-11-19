@@ -4,7 +4,7 @@
 - This repo contains **two independent Node services**: `api/` and `web/`.
 - Both services use **ES modules** and **Express 5**.
 - Root orchestration lives in `compose.yaml` with development overrides in `compose.dev.yaml`.
-- Persistence is MySQL plus the `whatsapp_auth` named Docker volume used by `whatsapp-web.js` `LocalAuth`.
+- Persistence is MySQL plus the `whatsapp_auth` named Docker volume used by Baileys `useMultiFileAuthState` (per-session directories under `baileys/<sessionId>/`).
 - The web app serves direct static JS/CSS from `web/public/`; do **not** assume a Webpack pipeline exists here.
 
 ## API rules
@@ -20,7 +20,7 @@
   - error: `{ error: true, status, type, message, data? }`
 - MySQL access flows through `api/helpers/mysql.js`, `api/model/model.js`, and model classes such as `api/model/scheduled-message.js`.
 - Background delivery behavior belongs in `api/background/`. Per-session WhatsApp lifecycle behavior belongs in `api/services/whatsapp-client-manager.js`, and cross-session orchestration belongs in `api/services/whatsapp-session-manager.js`.
-- `whatsapp-web.js` is unofficial and depends on QR pairing plus Chromium in Docker; do not describe it like an official WhatsApp Business API integration.
+- `baileys` is unofficial and depends on QR pairing over a direct WebSocket; do not describe it like an official WhatsApp Business API integration. The API image has no browser runtime.
 
 ## Web rules
 - The web service is an SSR Mustache app with a routing gateway at `/`, a dedicated login/pairing page at `/login`, a session-specific scheduler page at `/session/:id`, and readiness JSON at `/ready`.

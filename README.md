@@ -1,8 +1,8 @@
 # WhatsBot
 
-WhatsBot is a small two-service Node application for scheduling WhatsApp messages. It is built around Docker Compose, MySQL persistence, and [`whatsapp-web.js`](https://wwebjs.dev/) running with Chromium inside the API container.
+WhatsBot is a small two-service Node application for scheduling WhatsApp messages. It is built around Docker Compose, MySQL persistence, and [`baileys`](https://github.com/WhiskeySockets/Baileys), a direct WebSocket WhatsApp client with no browser runtime.
 
-> `whatsapp-web.js` is an unofficial Web WhatsApp client library. This project depends on QR pairing with a real WhatsApp account and can break when WhatsApp Web changes upstream.
+> `baileys` is an unofficial WhatsApp client library. This project depends on QR pairing with a real WhatsApp account and can break when WhatsApp changes its protocol upstream.
 
 ## What is in this repository
 
@@ -22,7 +22,7 @@ The API uses:
 - Express 5 + ES modules
 - `mysql2/promise` for MySQL access
 - a `Mysql` helper and `Model`/`ScheduledMessage` model structure
-- `whatsapp-web.js` + `LocalAuth`
+- `baileys` + `useMultiFileAuthState` (one auth directory per session)
 - a background `MessageDispatcher` polling loop
 
 Current HTTP routes:
@@ -37,7 +37,7 @@ Current HTTP routes:
 - `GET /whatsapp/session`
   - accepts optional `sessionId` query string and returns the current session state, including QR data when pairing is required, and `chatDirectory` (`{ contacts, groups, refreshedAt }`) with `{ id, name, targetType, targetValue, phoneNumber, chatId, label }` entries
 - `POST /whatsapp/sessions`
-  - creates one new WhatsApp app session with its own `LocalAuth` profile
+  - creates one new WhatsApp app session with its own Baileys auth directory
 - `GET /whatsapp/sessions/:sessionId`
   - returns the current state for a specific app session
 - `GET /ready`
@@ -46,11 +46,11 @@ Current HTTP routes:
 
 The dispatcher only sends due messages when their owning WhatsApp session is ready. Messages remain pending if their session is still waiting for pairing or temporarily disconnected.
 
-After the access registry initializes, startup restores the default session and registered sessions in the background. Only profiles with WhatsApp IndexedDB storage under `session-<id>/Default/IndexedDB` are candidates; empty or missing profiles are skipped. Existing storage does not guarantee valid pairing. Initial boots and recovery boots share a queue to avoid starting multiple Chromium instances at once. An explicit session-state request still boots a skipped profile so its QR remains available.
+After the access registry initializes, startup restores the default session and registered sessions in the background. A session is a restoration candidate only when `baileys/<sessionId>/creds.json` exists and carries `registered` or `me`; unpaired credentials are skipped. Existing credentials do not guarantee valid pairing. Initial boots and recovery boots share a queue so only one WebSocket handshake runs at a time. An explicit session-state request still boots a skipped session so its QR remains available.
 
-A dropped connection or failed boot triggers up to five automatic rebuilds: the first immediately, then after 1, 2, 4, and 8 seconds (delays are capped at 30 seconds when configured for more attempts). A ready event resets the retry budget. State responses add `reconnectAttempt`, `nextReconnectAt`, and `needsQrCode`, and return progress without waiting for an in-flight browser boot. Logout, unpaired states, and authentication failures stop recovery, close the client, and report `needsQrCode: true`. Polling does not restart exhausted or logged-out sessions.
+A dropped connection or failed boot first runs up to five fast rebuilds: immediately, then after 1, 2, 4, and 8 seconds (delays are capped at 30 seconds when configured for more attempts). Once the fast budget is exhausted the session keeps retrying at a fixed slow interval (`WHATSAPP_RECONNECT_SLOW_RETRY_MS`, default five minutes) instead of giving up, so a router reboot or a long outage heals on its own. A QR emission or a ready event resets `reconnectAttempt` to 0: an unscanned QR timeout simply produces a fresh QR forever, matching the old browser client. State responses add `reconnectAttempt`, `nextReconnectAt`, and `needsQrCode`, and return progress without waiting for an in-flight socket boot. `DisconnectReason.loggedOut` stops recovery, closes the socket, and reports `needsQrCode: true`; slow retries never apply to a logged-out session, and polling does not restart one.
 
-Chat-directory acquisition tries `getChats()` first and falls back to `getContacts()` only when `getChats()` throws (logging primary unavailability once until recovery). Both sources exclude `@lid`, broadcast, malformed ids, and unnamed people, deduplicate by canonical id, and sort in `pt-BR` order. Both-source failures preserve the last directory, retry after 30 seconds, and log each distinct failure once until a successful refresh. Sending remains available when enrichment fails. Sends preserve supplied serialized, raw-model, string, or component message ids; if WhatsApp returns none, the id stays null and a warning is logged. Message ids do not require a delivery acknowledgement.
+The contact directory is event-driven. Baileys `messaging-history.set`, `contacts.upsert/update` and `chats.upsert/update` events feed an in-memory index; group subjects come from `groupFetchAllParticipating()` and refresh at most once every ten minutes. Entries exclude LIDs without a phone number, broadcasts, malformed ids, and unnamed people, deduplicate by canonical id, and sort in `pt-BR` order. A JSON snapshot is written next to the auth state and restored on startup, so the picker survives a restart before history sync finishes. Group-metadata failures preserve the snapshot, retry after 30 seconds, and log each distinct failure once until a successful refresh. Sending remains available when enrichment fails. Sends use `onWhatsApp()` to resolve phone numbers (including the Brazil nine-digit candidates) and preserve the Baileys message id from `key.id`; if WhatsApp returns none, the id stays null and a warning is logged.
 
 Self-command scheduling is also supported per session. When a paired user sends a message to their own chat in the format below, the API converts it into a scheduled message owned by that session:
 
@@ -148,15 +148,17 @@ Typical local flow:
 ## Persistence and runtime caveats
 
 - **MySQL** stores scheduled messages, delivery lifecycle data, and the session id to hashed session-token plus hashed recovery-password registry used by the login and restore flow.
-- **`whatsapp_auth` named volume** persists the `LocalAuth` session directory mounted at `/whatsapp/auth`, so QR pairing survives container recreation.
+- **`whatsapp_auth` named volume** persists the Baileys auth directory mounted at `/whatsapp/auth`, under `baileys/<sessionId>/`, so QR pairing survives container recreation. Credentials use `creds.json` plus per-key files written by `useMultiFileAuthState`; the contact snapshot lives in `chat-directory.json` in the same directory. The API never reads, modifies, or deletes the old `session-*` Chromium profiles.
 - Existing installations that still have `whatsbot-session-access.json` can be migrated forward by creating the `whatsapp_session_access` table and restarting the API once. The API imports legacy entries into MySQL when that file is present, but it no longer writes session access state back to JSON.
 - Schema changes must be applied explicitly through a planned migration workflow. The application must not patch or evolve the database schema at startup.
 - The SQL files under `api/data/mysql/` are schema artifacts, not a runtime migration engine. Provisioning and deployment must execute the appropriate schema or migration steps outside the API process.
 - Existing environments created before the multi-session change must apply [api/data/mysql/migrations/20260415_add_session_id_to_scheduled_messages.sql](/Users/pablowerlang/Documents/Workspaces/whatsbot/api/data/mysql/migrations/20260415_add_session_id_to_scheduled_messages.sql) manually before running the updated API.
 - Existing environments that stored session access data in JSON must also apply [api/data/mysql/migrations/20260416_create_whatsapp_session_access.sql](/Users/pablowerlang/Documents/Workspaces/whatsbot/api/data/mysql/migrations/20260416_create_whatsapp_session_access.sql) before restarting the API.
 - If the WhatsApp session becomes invalid, you may need to re-pair by scanning a new QR code.
-- If the API log shows `ProtocolError: Runtime.callFunctionOn timed out` from `Client.inject`, check the session's retry state first: the API closes the failed client and rebuilds it with bounded backoff. A timeout alone does not prove profile corruption. Once attempts are exhausted, restarting the API retries persisted profiles. Authentication failures or logout require pairing again; creating a session provides a new QR flow.
-- The API image installs Chromium because `whatsapp-web.js` needs a browser runtime inside Docker.
+- The API layer is a thin transport wrapper: `api/services/whatsapp-client-manager.js` owns the Baileys socket, `api/services/whatsapp-session-manager.js` owns the session registry, and routes/dispatcher/web use the same public contract as before. Chrome, Puppeteer, and `whatsapp-web.js` are not part of the runtime or the image.
+- A logged-out session (`DisconnectReason.loggedOut`) stops reconnecting and reports `needsQrCode: true`; create a new app session to get a fresh QR. Other disconnects keep retrying with bounded backoff; restart the API after exhausted attempts to retry persisted credentials.
+- The API image installs only `ca-certificates`: Baileys speaks the WhatsApp WebSocket protocol directly and needs no browser runtime.
+- Deployment note: the image now installs dependencies with `npm ci` from the lockfile. If an existing environment keeps a `node_modules_api` named volume from the browser era, recreate that volume (or run `npm ci` inside it) so the container sees `baileys` and no longer carries `whatsapp-web.js`.
 - The scheduler stores `scheduledFor` timestamps in UTC after validating timezone-aware input.
 - Each scheduled message belongs to one app session via `sessionId`.
 - The dispatcher polls every `SCHEDULER_POLL_INTERVAL_MS` milliseconds and claims work in small batches.
@@ -173,9 +175,9 @@ Current hardcoded API runtime defaults:
 
 - API host: `0.0.0.0`
 - API port: `3000`
-- WhatsApp `LocalAuth` path: `/whatsapp/auth`
+- WhatsApp auth path: `/whatsapp/auth` (Baileys sessions live under `/whatsapp/auth/baileys/<sessionId>`)
 - WhatsApp client id: `main`
-- Chromium executable path: `/usr/bin/chromium-browser`
+- WhatsApp transport: `baileys` `7.0.0-rc14` (exact pin), logger `pino` at `warn`
 - MySQL host/user/port in the helper: `mysql` / `root` / `3306`
 
 Current scheduled message statuses in MySQL: `pending`, `processing`, `sent`, `failed`.
@@ -188,11 +190,11 @@ The root `.env.example` documents the current Compose-oriented defaults. The mai
 - `API_URL` / `WEB_URL`
 - `MYSQL_DATABASE` / `MYSQL_ROOT_PASSWORD`
 - `SCHEDULER_POLL_INTERVAL_MS` / `SCHEDULER_BATCH_SIZE` / `SCHEDULER_CLAIM_TIMEOUT_MS`
-- API process environment: `WHATSAPP_PROTOCOL_TIMEOUT_MS` (default `300000`), `WHATSAPP_RECONNECT_MAX_ATTEMPTS` (default `5`, `0` disables automatic recovery), `WHATSAPP_RECONNECT_DELAY_MS` (default `1000`), `WHATSAPP_RECONNECT_MAX_DELAY_MS` (default `30000`), and `WHATSAPP_CHAT_DIRECTORY_RETRY_MS` (default `30000`). Inject overrides into the API container environment; adding them only to the root `.env` does not forward them through Compose. Delay values have a minimum of `1` ms.
+- API process environment: `WHATSAPP_RECONNECT_MAX_ATTEMPTS` (default `5`; `0` skips the fast phase), `WHATSAPP_RECONNECT_DELAY_MS` (default `1000`), `WHATSAPP_RECONNECT_MAX_DELAY_MS` (default `30000`), `WHATSAPP_RECONNECT_SLOW_RETRY_MS` (default `300000`), and `WHATSAPP_CHAT_DIRECTORY_RETRY_MS` (default `30000`). Inject overrides into the API container environment; adding them only to the root `.env` does not forward them through Compose. Delay values have a minimum of `1` ms.
 
 Notes:
 
-- The current API code does **not** read `WHATSAPP_CLIENT_ID`, `WHATSAPP_AUTH_PATH`, `WHATSAPP_PUPPETEER_ARGS`, or `PUPPETEER_EXECUTABLE_PATH` from the environment. Those values are currently hardcoded in `api/config/app-config.js`.
+- The current API code does **not** read `WHATSAPP_CLIENT_ID`, `WHATSAPP_AUTH_PATH`, `WHATSAPP_PUPPETEER_ARGS`, or `PUPPETEER_EXECUTABLE_PATH` from the environment. Those values are hardcoded in `api/config/app-config.js`. Browser-era variables such as `WHATSAPP_PROTOCOL_TIMEOUT_MS` and `PUPPETEER_EXECUTABLE_PATH` are ignored and do not crash startup.
 - The current MySQL helper does **not** read host, port, or username from the environment. It currently uses `mysql:3306` and `root` in code.
 - The old `DEV_*` port and URL overrides are not part of the current compose files.
 - The old `event-hub` auth variables are **not** part of the current WhatsBot runtime.
@@ -213,7 +215,7 @@ npm install
 npm run development
 ```
 
-When running outside Compose, the API still needs a reachable MySQL server and a Chromium executable compatible with `whatsapp-web.js`. The current code also assumes the WhatsApp auth directory is `/whatsapp/auth` unless you change the runtime config in `api/config/app-config.js`.
+When running outside Compose, the API still needs a reachable MySQL server and a writable auth directory. The current code assumes the WhatsApp auth directory is `/whatsapp/auth` unless you change the runtime config in `api/config/app-config.js`.
 
 ## Tests
 
@@ -227,11 +229,22 @@ cd ../web
 npm test
 ```
 
-The committed tests cover route and helper behavior. They do **not** prove full live WhatsApp delivery behavior, QR pairing, or browser parity. Manual validation is still needed for:
+The committed tests cover route and helper behavior, the Baileys lifecycle handlers (QR, open, logout, transient close), self-command detection over PN and LID jids, send resolution, and the event-driven directory. They do **not** prove full live WhatsApp delivery behavior or QR pairing. Manual validation is still needed for:
 
 - real WhatsApp pairing in Docker
 - actual scheduled message delivery through a connected account
 - browser UX behavior in a real browser session
+
+### Isolated Baileys test stack
+
+`compose.test.yaml` runs only `api` and `mysql` under the `whatsbot-baileys-test` project name, with its own volumes, its own default network, and `.env.test`. It publishes the API on `127.0.0.1:3310` and never joins the production `whatsbot` network.
+
+```bash
+docker compose -p whatsbot-baileys-test -f compose.test.yaml up -d --build
+curl -s 127.0.0.1:3310/ready
+```
+
+Create a session with `POST /whatsapp/sessions`, then poll `GET /whatsapp/session?sessionId=<id>` with the returned `x-whatsbot-session-token` header until `status` is `qr` and `qrCodeDataUrl` is present. For an existing pairing file under `.pairing/`, `node .pairing/qr.mjs` rewrites `.pairing/qr.png` with the current QR and prints only the status and `qrCodeUpdatedAt`; scan within ~20 seconds because WhatsApp rotates the code.
 
 ## Response shape
 
@@ -248,6 +261,7 @@ API responses use the project envelope style:
 ├── web/
 ├── compose.yaml
 ├── compose.dev.yaml
+├── compose.test.yaml
 └── .env.example
 ```
 
